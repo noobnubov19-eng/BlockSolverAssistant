@@ -158,7 +158,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.9 GUARD • захват запущен"
+            "v2.0 GM • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -277,7 +277,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.9 GUARD • ждём фигуры",
+                    "v2.0 GM • ждём фигуры",
                     null
                 )
             }
@@ -304,7 +304,7 @@ class CaptureService : Service() {
         overlayView?.post {
             overlayView?.showStatus(
                 overlayRect,
-                "v1.9 GUARD • проверяю...",
+                "v2.0 GM • проверяю...",
                 null
             )
         }
@@ -395,7 +395,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.9 GUARD • RETRY • $shapes • occ:$occupied",
+                    "v2.0 GM • RETRY • $shapes • occ:$occupied",
                     null
                 )
 
@@ -435,7 +435,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.9 GUARD • C:" +
+                    "v2.0 GM • C:" +
                         comboCount +
                         " " +
                         batchText +
