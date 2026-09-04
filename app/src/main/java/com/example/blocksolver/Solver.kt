@@ -37,6 +37,13 @@ class Solver(private val size: Int = 8) {
         mask
     }
 
+    private val windows3x3 = buildWindowMasks(3, 3)
+    private val windows2x3 = buildWindowMasks(2, 3)
+    private val windows3x2 = buildWindowMasks(3, 2)
+    private val windows2x2 = buildWindowMasks(2, 2)
+    private val windows1x5 = buildWindowMasks(1, 5)
+    private val windows5x1 = buildWindowMasks(5, 1)
+
     fun solve(
         initial: Array<BooleanArray>,
         pieces: List<Piece>
@@ -56,12 +63,14 @@ class Solver(private val size: Int = 8) {
         val allMask = (1 shl normalized.size) - 1
 
         fun search(board: Long, remainingMask: Int): Double {
-            if (remainingMask == 0) {
-                return evaluateBoard(board)
-            }
-
             val key = Key(board, remainingMask)
             memo[key]?.let { return it }
+
+            if (remainingMask == 0) {
+                val score = evaluateBoard(board)
+                memo[key] = score
+                return score
+            }
 
             var bestScore = Double.NEGATIVE_INFINITY
             var bestChoice: Choice? = null
@@ -206,12 +215,12 @@ class Solver(private val size: Int = 8) {
         val isolated = isolatedEmptyCells(board)
         val components = emptyComponents(board)
 
-        val open3x3 = countEmptyWindows(board, 3, 3)
-        val open2x3 = countEmptyWindows(board, 2, 3)
-        val open3x2 = countEmptyWindows(board, 3, 2)
-        val open2x2 = countEmptyWindows(board, 2, 2)
-        val open1x5 = countEmptyWindows(board, 1, 5)
-        val open5x1 = countEmptyWindows(board, 5, 1)
+        val open3x3 = countEmptyWindows(board, windows3x3)
+        val open2x3 = countEmptyWindows(board, windows2x3)
+        val open3x2 = countEmptyWindows(board, windows3x2)
+        val open2x2 = countEmptyWindows(board, windows2x2)
+        val open1x5 = countEmptyWindows(board, windows1x5)
+        val open5x1 = countEmptyWindows(board, windows5x1)
 
         var linePotential = 0
         for (r in 0 until 8) {
@@ -234,12 +243,11 @@ class Solver(private val size: Int = 8) {
             linePotential * 0.55
     }
 
-    private fun countEmptyWindows(
-        board: Long,
+    private fun buildWindowMasks(
         height: Int,
         width: Int
-    ): Int {
-        var count = 0
+    ): LongArray {
+        val out = ArrayList<Long>()
 
         for (top in 0..(8 - height)) {
             for (left in 0..(8 - width)) {
@@ -249,9 +257,21 @@ class Solver(private val size: Int = 8) {
                         mask = mask or bit(top + r, left + c)
                     }
                 }
-                if ((board and mask) == 0L) {
-                    count++
-                }
+                out += mask
+            }
+        }
+
+        return out.toLongArray()
+    }
+
+    private fun countEmptyWindows(
+        board: Long,
+        masks: LongArray
+    ): Int {
+        var count = 0
+        for (mask in masks) {
+            if ((board and mask) == 0L) {
+                count++
             }
         }
         return count
