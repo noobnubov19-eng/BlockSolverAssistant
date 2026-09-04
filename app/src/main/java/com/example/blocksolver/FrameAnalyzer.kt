@@ -74,50 +74,115 @@ class FrameAnalyzer {
         bitmap: Bitmap,
         rect: RectF
     ): Array<BooleanArray> {
-        val features = Array(8) {
-            arrayOfNulls<CellFeature>(8)
-        }
+        val colors = Array(64) { Rgb(0f, 0f, 0f) }
+        val textures = FloatArray(64)
 
         val cw = rect.width() / 8f
         val ch = rect.height() / 8f
 
+        var index = 0
         for (r in 0 until 8) {
             for (c in 0 until 8) {
-                features[r][c] = readCellFeature(
+                val feature = readCellFeature(
                     bitmap,
                     rect.left + c * cw,
                     rect.top + r * ch,
                     cw,
                     ch
                 )
+                colors[index] = feature.color
+                textures[index] = feature.texture
+                index++
             }
         }
 
-        // Empty slots are visually much flatter than glossy game blocks.
-        // Use the flattest cell as the reference color for THIS board theme.
-        var ref = features[0][0]!!
-        for (r in 0 until 8) {
-            for (c in 0 until 8) {
-                val f = features[r][c]!!
-                if (f.texture < ref.texture) {
-                    ref = f
+        // IMPORTANT:
+        // Do not use texture to decide occupancy.
+        // Some later themes have a textured empty board and raw MediaProjection
+        // preserves that texture more strongly than a saved JPEG screenshot.
+        //
+        // Instead find the densest RGB cluster among the 64 cell medians.
+        // Empty slots share almost the same median color even when the theme changes,
+        // while occupied blocks are colored outliers.
+        val clusterRadius = 0.060f
+
+        var bestIndex = 0
+        var bestCount = -1
+        var bestTexture = Float.MAX_VALUE
+
+        for (i in colors.indices) {
+            var count = 0
+
+            for (j in colors.indices) {
+                if (
+                    distance(colors[i], colors[j]) <=
+                    clusterRadius
+                ) {
+                    count++
                 }
             }
+
+            if (
+                count > bestCount ||
+                (
+                    count == bestCount &&
+                    textures[i] < bestTexture
+                )
+            ) {
+                bestIndex = i
+                bestCount = count
+                bestTexture = textures[i]
+            }
         }
 
-        val out = Array(8) { BooleanArray(8) }
+        // Average only the dense cluster to get the current empty-cell reference.
+        var sr = 0f
+        var sg = 0f
+        var sb = 0f
+        var n = 0
+
+        for (color in colors) {
+            if (
+                distance(color, colors[bestIndex]) <=
+                clusterRadius
+            ) {
+                sr += color.r
+                sg += color.g
+                sb += color.b
+                n++
+            }
+        }
+
+        val emptyReference =
+            if (n > 0) {
+                Rgb(
+                    sr / n,
+                    sg / n,
+                    sb / n
+                )
+            } else {
+                colors[bestIndex]
+            }
+
+        // Empty slots in all captured themes are extremely tightly clustered.
+        // 0.095 leaves a large safety margin while still separating colored blocks.
+        val occupiedThreshold = 0.095f
+
+        val out = Array(8) {
+            BooleanArray(8)
+        }
+
+        index = 0
 
         for (r in 0 until 8) {
             for (c in 0 until 8) {
-                val f = features[r][c]!!
-                val colorDelta = distance(f.color, ref.color)
-
-                // Color distance catches solid/dark blocks on a light board.
-                // Texture catches glossy/beveled blocks whose center color
-                // happens to be closer to the board theme.
                 out[r][c] =
-                    colorDelta > 0.105f ||
-                    f.texture > max(0.022f, ref.texture + 0.014f)
+                    distance(
+                        colors[index],
+                        emptyReference
+                    ) > occupiedThreshold
+
+                index++
             }
         }
 
