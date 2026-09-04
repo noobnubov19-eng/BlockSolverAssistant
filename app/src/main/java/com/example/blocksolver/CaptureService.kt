@@ -186,7 +186,7 @@ class CaptureService : Service() {
                 val now = System.currentTimeMillis()
 
                 if (
-                    now - lastAnalyzeMs < 450 ||
+                    now - lastAnalyzeMs < 140 ||
                     !busy.compareAndSet(false, true)
                 ) {
                     r.acquireLatestImage()?.close()
