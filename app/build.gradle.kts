@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.blocksolver"
         minSdk = 26
         targetSdk = 35
-        versionCode = 18
-        versionName = "1.8-vision-lock"
+        versionCode = 19
+        versionName = "1.9-shape-guard"
     }
 
     compileOptions {
