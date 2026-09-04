@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * v1.0 Survival solver.
+ * v2.0 Grandmaster solver.
  *
  * 1) Searches the complete legal order/placement tree for the CURRENT visible pieces.
  * 2) Clears completed rows/columns after every placement.
@@ -62,6 +62,11 @@ class Solver(private val size: Int = 8) {
     // that most often kill a fragmented 8x8 board.
     private val futureShapes: List<FutureShape> = buildFutureShapes()
 
+    // A smaller, deliberately difficult next-piece catalog used for
+    // one-piece lookahead at terminal states. This is much deeper than
+    // static mobility, but still fast enough for real-time phone use.
+    private val rolloutShapes: List<FutureShape> = buildRolloutShapes()
+
     fun solve(
         initial: Array<BooleanArray>,
         pieces: List<Piece>,
@@ -79,6 +84,7 @@ class Solver(private val size: Int = 8) {
         val memo = HashMap<Key, Double>(65536)
         val choices = HashMap<Key, Choice>(65536)
         val evalCache = HashMap<Long, Double>(16384)
+        val rolloutCache = HashMap<Long, Double>(16384)
 
         val startBoard = toBits(initial)
         val allMask = (1 shl normalized.size) - 1
@@ -91,11 +97,15 @@ class Solver(private val size: Int = 8) {
                 evaluateBoard(board)
             }
 
+            val futureLookahead = rolloutCache.getOrPut(board) {
+                futureRobustness(board)
+            }
+
             val comboContinuity =
                 if (clearedInBatch) {
                     5200.0 +
                         min(comboCount, 50) * 220.0 +
-                        nextBatchSetupPotential(board)
+                        nextBatchSetupPotential(board) * 1.15
                 } else if (comboCount > 0) {
                     // Losing a live combo is catastrophic for score.
                     // Keep this far below any normal board-evaluation swing.
@@ -106,7 +116,9 @@ class Solver(private val size: Int = 8) {
                     -40_000.0
                 }
 
-            return base + comboContinuity
+            return base +
+                comboContinuity +
+                futureLookahead
         }
 
         fun search(
@@ -341,11 +353,204 @@ class Solver(private val size: Int = 8) {
                     colCounts[c] == 7
                 ) {
                     bonus += 1700.0
+                } else if (
+                    rowCounts[r] >= 6 &&
+                    colCounts[c] >= 6
+                ) {
+                    bonus += 360.0
                 }
             }
         }
 
         return bonus
+    }
+
+    /**
+     * One unseen-piece lookahead.
+     *
+     * For every dangerous/common future shape, try EVERY legal placement,
+     * keep the best response, then combine weighted expectation with the
+     * worst dangerous outcome. This makes the current move robust to the
+     * next random piece instead of relying only on hand-written heuristics.
+     */
+    private fun futureRobustness(
+        board: Long
+    ): Double {
+        var weighted = 0.0
+        var totalWeight = 0.0
+        var worst = Double.POSITIVE_INFINITY
+        var zeroWeight = 0.0
+
+        for (shape in rolloutShapes) {
+            var fits = 0
+            var bestAfter = Double.NEGATIVE_INFINITY
+
+            for (mask in shape.masks) {
+                if ((board and mask) != 0L) {
+                    continue
+                }
+
+                fits++
+
+                val clear =
+                    clearLines(board or mask)
+
+                val score =
+                    quickRolloutScore(
+                        clear.first,
+                        clear.second
+                    )
+
+                if (score > bestAfter) {
+                    bestAfter = score
+                }
+            }
+
+            if (fits == 0) {
+                zeroWeight += shape.weight
+                bestAfter =
+                    -9000.0 -
+                    shape.weight * 1800.0
+            } else {
+                // Multiple legal homes for a future piece are safer than
+                // having exactly one fragile placement.
+                bestAfter +=
+                    min(fits, 14) * 48.0
+            }
+
+            weighted +=
+                bestAfter * shape.weight
+
+            totalWeight += shape.weight
+
+            worst =
+                min(
+                    worst,
+                    bestAfter
+                )
+        }
+
+        if (totalWeight <= 0.0) {
+            return 0.0
+        }
+
+        val expected =
+            weighted / totalWeight
+
+        // 60% worst-case, 40% expected-case:
+        // Block Blast can throw an awkward piece, so the solver must not
+        // choose a board that is brilliant on average but dies to one shape.
+        return (
+            expected * 0.40 +
+            worst * 0.60 -
+            zeroWeight * 3600.0
+        )
+    }
+
+    /**
+     * Cheap score used inside future lookahead.
+     * Intentionally avoids the full future-shape loop to prevent recursion
+     * and keep v2.0 responsive.
+     */
+    private fun quickRolloutScore(
+        board: Long,
+        clearedLines: Int
+    ): Double {
+        val occupied = bitCount(board)
+
+        val open3 =
+            countEmptyWindows(
+                board,
+                windows3x3
+            )
+
+        val openH5 =
+            countEmptyWindows(
+                board,
+                windows1x5
+            )
+
+        val openV5 =
+            countEmptyWindows(
+                board,
+                windows5x1
+            )
+
+        val open23 =
+            countEmptyWindows(
+                board,
+                windows2x3
+            ) +
+            countEmptyWindows(
+                board,
+                windows3x2
+            )
+
+        val isolated =
+            isolatedEmptyCells(board)
+
+        val hardPenalty =
+            (if (open3 == 0) 5200.0 else 0.0) +
+            (if (openH5 == 0) 2400.0 else 0.0) +
+            (if (openV5 == 0) 2400.0 else 0.0)
+
+        val overfill =
+            max(
+                0,
+                occupied - 38
+            )
+
+        return (
+            clearedLines * 1500.0 -
+            occupied * 7.0 +
+            open3 * 82.0 +
+            (openH5 + openV5) * 24.0 +
+            open23 * 12.0 -
+            isolated * 110.0 -
+            overfill * overfill * 22.0 -
+            hardPenalty +
+            nextBatchSetupPotential(board) * 0.22
+        )
+    }
+
+    private fun buildRolloutShapes():
+        List<FutureShape> {
+        val defs = listOf(
+            2.20 to cells("0,0;0,1;0,2;0,3;0,4"),
+            2.20 to cells("0,0;1,0;2,0;3,0;4,0"),
+            2.80 to cells(
+                "0,0;0,1;0,2;" +
+                "1,0;1,1;1,2;" +
+                "2,0;2,1;2,2"
+            ),
+            1.80 to cells("0,0;0,1;0,2;1,0;1,1;1,2"),
+            1.80 to cells("0,0;0,1;1,0;1,1;2,0;2,1"),
+            1.65 to cells("0,0;1,0;2,0;2,1;2,2"),
+            1.65 to cells("0,0;0,1;0,2;1,0;2,0"),
+            1.65 to cells("0,2;1,2;2,0;2,1;2,2"),
+            1.65 to cells("0,0;0,1;0,2;1,2;2,2"),
+            1.35 to cells("0,0;0,1;0,2;1,1"),
+            1.35 to cells("0,1;1,0;1,1;2,1")
+        )
+
+        return defs.map {
+            (weight, shapeCells) ->
+
+            val piece =
+                Piece(
+                    shapeCells
+                ).normalized()
+
+            FutureShape(
+                weight = weight,
+                masks =
+                    buildCandidates(piece)
+                        .map {
+                            it.mask
+                        }
+                        .toLongArray()
+            )
+        }
     }
 
     private fun buildCandidates(piece: Piece): List<Candidate> {
