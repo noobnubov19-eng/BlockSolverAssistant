@@ -232,7 +232,7 @@ class Solver(private val size: Int = 8) {
             linePotential += n * n
         }
 
-        return
+        return (
             -occupied * 8.0 -
             isolated * 125.0 -
             max(0, components - 1) * 28.0 +
@@ -241,6 +241,7 @@ class Solver(private val size: Int = 8) {
             open2x2 * 5.0 +
             (open1x5 + open5x1) * 7.0 +
             linePotential * 0.55
+        )
     }
 
     private fun buildWindowMasks(
