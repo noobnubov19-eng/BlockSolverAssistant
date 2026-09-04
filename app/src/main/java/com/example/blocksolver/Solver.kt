@@ -117,8 +117,15 @@ class Solver(private val size: Int = 8) {
 
                     // We still reward clears, but not enough to sacrifice future survival.
                     val clearBonus =
-                        clearedLines * 760.0 +
-                        if (clearedLines >= 2) (clearedLines - 1) * 260.0 else 0.0
+                        when (clearedLines) {
+                            0 -> 0.0
+                            1 -> 760.0
+                            2 -> 2100.0
+                            3 -> 3900.0
+                            4 -> 6200.0
+                            else -> 6200.0 +
+                                (clearedLines - 4) * 2600.0
+                        }
 
                     val score = child + clearBonus
 
