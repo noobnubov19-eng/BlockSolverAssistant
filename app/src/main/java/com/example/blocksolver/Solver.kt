@@ -93,14 +93,17 @@ class Solver(private val size: Int = 8) {
 
             val comboContinuity =
                 if (clearedInBatch) {
-                    2200.0 +
-                        min(comboCount, 40) * 120.0 +
+                    5200.0 +
+                        min(comboCount, 50) * 220.0 +
                         nextBatchSetupPotential(board)
                 } else if (comboCount > 0) {
-                    -18000.0 -
-                        min(comboCount, 40) * 650.0
+                    // Losing a live combo is catastrophic for score.
+                    // Keep this far below any normal board-evaluation swing.
+                    -1_000_000.0 -
+                        min(comboCount, 50) * 10_000.0
                 } else {
-                    -4500.0
+                    // Even from combo 0, strongly prefer starting the chain.
+                    -40_000.0
                 }
 
             return base + comboContinuity
@@ -165,8 +168,8 @@ class Solver(private val size: Int = 8) {
                             !clearedInBatch &&
                             clearedLines > 0
                         ) {
-                            3600.0 +
-                                min(comboCount, 35) * 180.0
+                            6200.0 +
+                                min(comboCount, 45) * 300.0
                         } else {
                             0.0
                         }
@@ -283,14 +286,14 @@ class Solver(private val size: Int = 8) {
         val multiLineExtra =
             when (lines) {
                 1 -> 0.0
-                2 -> 500.0
-                3 -> 1500.0
-                4 -> 3200.0
-                5 -> 5200.0
-                else -> 7000.0
+                2 -> 900.0
+                3 -> 2600.0
+                4 -> 5200.0
+                5 -> 8200.0
+                else -> 11000.0
             }
 
-        return base * multiplier * 4.6 +
+        return base * multiplier * 5.0 +
             multiLineExtra
     }
 
@@ -313,18 +316,18 @@ class Solver(private val size: Int = 8) {
 
         for (r in 0 until 8) {
             bonus += when (rowCounts[r]) {
-                7 -> 260.0
-                6 -> 90.0
-                5 -> 28.0
+                7 -> 520.0
+                6 -> 170.0
+                5 -> 45.0
                 else -> 0.0
             }
         }
 
         for (c in 0 until 8) {
             bonus += when (colCounts[c]) {
-                7 -> 260.0
-                6 -> 90.0
-                5 -> 28.0
+                7 -> 520.0
+                6 -> 170.0
+                5 -> 45.0
                 else -> 0.0
             }
         }
@@ -337,7 +340,7 @@ class Solver(private val size: Int = 8) {
                     rowCounts[r] == 7 &&
                     colCounts[c] == 7
                 ) {
-                    bonus += 900.0
+                    bonus += 1700.0
                 }
             }
         }
@@ -459,27 +462,37 @@ class Solver(private val size: Int = 8) {
         val componentCoverage =
             if (empties > 0) largestEmptyComponent.toDouble() / empties else 0.0
 
+        val overfill =
+            max(0, occupied - 34)
+
+        val hardSpacePenalty =
+            (if (open3x3 == 0) 6800.0 else 0.0) +
+            (if (open1x5 == 0) 3400.0 else 0.0) +
+            (if (open5x1 == 0) 3400.0 else 0.0)
+
         return (
             // Future survivability dominates the decision.
-            mobilityWeighted * 20.0 -
-            zeroWeighted * 780.0 +
-            minDangerFits * 42.0 +
+            mobilityWeighted * 23.0 -
+            zeroWeighted * 1650.0 +
+            minDangerFits * 70.0 +
 
             // Keep large usable regions.
-            open3x3 * 44.0 +
-            (open2x3 + open3x2) * 14.0 +
-            open2x2 * 5.0 +
-            (open1x5 + open5x1) * 11.0 +
-            largestEmptyComponent * 7.0 +
-            componentCoverage * 180.0 +
+            open3x3 * 60.0 +
+            (open2x3 + open3x2) * 18.0 +
+            open2x2 * 6.0 +
+            (open1x5 + open5x1) * 15.0 +
+            largestEmptyComponent * 9.0 +
+            componentCoverage * 240.0 +
 
             // Preserve line-building opportunities without becoming greedy.
-            linePotential * 0.34 -
+            linePotential * 0.30 -
 
-            // Strong anti-fragmentation penalties.
-            occupied * 5.0 -
-            isolated * 165.0 -
-            max(0, components - 1) * 74.0
+            // Strong anti-fragmentation / anti-overfill penalties.
+            occupied * 6.0 -
+            isolated * 220.0 -
+            max(0, components - 1) * 105.0 -
+            overfill * overfill * 28.0 -
+            hardSpacePenalty
         )
     }
 
