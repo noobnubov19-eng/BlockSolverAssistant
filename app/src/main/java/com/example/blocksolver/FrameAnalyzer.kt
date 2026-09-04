@@ -141,11 +141,10 @@ class FrameAnalyzer {
         val hsv = FloatArray(3)
         Color.colorToHSV(color, hsv)
 
-        // Empty board/background is also green, but much less saturated.
-        // Real blocks on the supplied screenshots sit around hue 110-120°,
-        // saturation ~0.45-0.55.
-        return hsv[0] in 70f..150f &&
-            hsv[1] > 0.34f &&
-            hsv[2] > 0.38f
+        // Color-independent block detector.
+        // The game changes themes: blocks can be green, cyan, purple, blue, etc.
+        // Real blocks are bright and saturated; board/tray background is darker.
+        return hsv[1] > 0.50f &&
+            hsv[2] > 0.80f
     }
 }
