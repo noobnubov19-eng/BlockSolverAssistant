@@ -26,5 +26,6 @@ data class Solution(
     val score: Double,
     val firstMoveLines: Int = 0,
     val projectedCombo: Int = 0,
-    val projectedGap: Int = 0
+    val projectedGap: Int = 0,
+    val projectedBatchCleared: Boolean = false
 )
