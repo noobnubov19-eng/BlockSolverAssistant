@@ -259,7 +259,6 @@ class FrameAnalyzer {
             .toInt()
             .coerceIn(y0 + 1, h)
 
-        // Strict lanes prevent one long piece from being detected twice.
         val ranges = listOf(
             (w * 0.04f).toInt() until (w * 0.32f).toInt(),
             (w * 0.32f).toInt() until (w * 0.64f).toInt(),
@@ -280,13 +279,9 @@ class FrameAnalyzer {
                 y1
             )
 
-            // First find the visible bounding box by RGB distance
-            // from the lane's own current-theme background.
-            var minX = Int.MAX_VALUE
-            var maxX = Int.MIN_VALUE
-            var minY = Int.MAX_VALUE
-            var maxY = Int.MIN_VALUE
-            var foregroundCount = 0
+            // Use only STRONG color outliers to define the piece bounding box.
+            // This avoids tray texture/shadows enlarging or shrinking the shape.
+            val strongPoints = ArrayList<Pair<Int, Int>>()
 
             for (y in y0 until y1 step 2) {
                 for (x in x0 until x1 step 2) {
@@ -295,23 +290,32 @@ class FrameAnalyzer {
                         background
                     )
 
-                    if (d > 0.075f) {
-                        foregroundCount++
-                        minX = minOf(minX, x)
-                        maxX = maxOf(maxX, x)
-                        minY = minOf(minY, y)
-                        maxY = maxOf(maxY, y)
+                    if (d > 0.115f) {
+                        strongPoints += x to y
                     }
                 }
             }
 
-            // Empty lane / tiny compression noise.
-            if (
-                foregroundCount < 45 ||
-                minX == Int.MAX_VALUE
-            ) {
+            if (strongPoints.size < 35) {
                 continue
             }
+
+            val xs = strongPoints.map { it.first }.sorted()
+            val ys = strongPoints.map { it.second }.sorted()
+
+            // Ignore a tiny fraction of isolated glow/shadow pixels.
+            val trimX = (xs.size * 0.015f)
+                .toInt()
+                .coerceIn(0, max(0, xs.size / 8))
+
+            val trimY = (ys.size * 0.015f)
+                .toInt()
+                .coerceIn(0, max(0, ys.size / 8))
+
+            val minX = xs[trimX]
+            val maxX = xs[xs.lastIndex - trimX]
+            val minY = ys[trimY]
+            val maxY = ys[ys.lastIndex - trimY]
 
             val boxW = (maxX - minX + 1).toFloat()
             val boxH = (maxY - minY + 1).toFloat()
@@ -328,49 +332,104 @@ class FrameAnalyzer {
 
             val cells = mutableSetOf<Cell>()
 
+            // IMPORTANT:
+            // Do not decide a cell from ONE center pixel.
+            // Count foreground coverage over the whole interior of each inferred cell.
+            // This fixes L-pieces where one arm could be missed by a single sample.
             for (r in 0 until rows) {
                 for (c in 0 until cols) {
-                    val cx = (
-                        minX +
-                            (c + .5f) *
-                            boxW / cols
-                        )
-                        .toInt()
-                        .coerceIn(0, w - 1)
+                    val left = minX + c * boxW / cols
+                    val right = minX + (c + 1) * boxW / cols
+                    val top = minY + r * boxH / rows
+                    val bottom = minY + (r + 1) * boxH / rows
 
-                    val cy = (
-                        minY +
-                            (r + .5f) *
-                            boxH / rows
-                        )
-                        .toInt()
-                        .coerceIn(0, h - 1)
+                    val marginX = (right - left) * 0.16f
+                    val marginY = (bottom - top) * 0.16f
 
-                    val sample = patchMedianRgb(
-                        bitmap,
-                        cx,
-                        cy,
-                        max(2, (pitch * 0.10f).toInt())
-                    )
+                    val sx0 = (left + marginX).toInt()
+                    val sx1 = (right - marginX).toInt()
+                    val sy0 = (top + marginY).toInt()
+                    val sy1 = (bottom - marginY).toInt()
 
-                    if (
-                        distance(sample, background) >
-                        0.070f
-                    ) {
+                    var total = 0
+                    var foreground = 0
+
+                    for (y in sy0..sy1 step 2) {
+                        for (x in sx0..sx1 step 2) {
+                            total++
+
+                            if (
+                                distance(
+                                    rgb(bitmap.getPixel(
+                                        x.coerceIn(0, w - 1),
+                                        y.coerceIn(0, h - 1)
+                                    )),
+                                    background
+                                ) > 0.065f
+                            ) {
+                                foreground++
+                            }
+                        }
+                    }
+
+                    val ratio =
+                        if (total > 0) {
+                            foreground.toFloat() / total
+                        } else {
+                            0f
+                        }
+
+                    if (ratio > 0.22f) {
                         cells += Cell(r, c)
                     }
                 }
             }
 
+            // Keep only plausible, connected game pieces.
             if (
                 cells.isNotEmpty() &&
-                cells.size <= 9
+                cells.size <= 9 &&
+                isConnected(cells)
             ) {
                 result += Piece(cells).normalized()
             }
         }
 
         return result
+    }
+
+    private fun isConnected(cells: Set<Cell>): Boolean {
+        if (cells.isEmpty()) return false
+
+        val seen = mutableSetOf<Cell>()
+        val queue = ArrayDeque<Cell>()
+
+        val first = cells.first()
+        seen += first
+        queue.addLast(first)
+
+        while (queue.isNotEmpty()) {
+            val cur = queue.removeFirst()
+
+            val neighbours = arrayOf(
+                Cell(cur.r - 1, cur.c),
+                Cell(cur.r + 1, cur.c),
+                Cell(cur.r, cur.c - 1),
+                Cell(cur.r, cur.c + 1)
+            )
+
+            for (next in neighbours) {
+                if (
+                    next in cells &&
+                    next !in seen
+                ) {
+                    seen += next
+                    queue.addLast(next)
+                }
+            }
+        }
+
+        return seen.size == cells.size
     }
 
     private fun estimateLaneBackground(
