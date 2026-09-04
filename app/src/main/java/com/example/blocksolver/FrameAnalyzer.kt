@@ -567,7 +567,7 @@ class FrameAnalyzer {
                             0f
                         }
 
-                    if (coverage > 0.24f) {
+                    if (coverage > 0.17f) {
                         cells += Cell(r, c)
                     }
                 }
@@ -595,7 +595,7 @@ class FrameAnalyzer {
         var i = 0
 
         // Tiny seams between adjacent blocks can produce a few low bins.
-        val allowedGap = 3
+        val allowedGap = 12
 
         while (i < counts.size) {
             while (
