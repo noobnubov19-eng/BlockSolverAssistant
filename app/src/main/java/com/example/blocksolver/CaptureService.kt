@@ -158,7 +158,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.8 LOCK • захват запущен"
+            "v1.9 GUARD • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -277,7 +277,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.8 LOCK • ждём фигуры",
+                    "v1.9 GUARD • ждём фигуры",
                     null
                 )
             }
@@ -304,7 +304,7 @@ class CaptureService : Service() {
         overlayView?.post {
             overlayView?.showStatus(
                 overlayRect,
-                "v1.8 LOCK • проверяю...",
+                "v1.9 GUARD • проверяю...",
                 null
             )
         }
@@ -395,7 +395,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.8 LOCK • RETRY • $shapes • occ:$occupied",
+                    "v1.9 GUARD • RETRY • $shapes • occ:$occupied",
                     null
                 )
 
@@ -426,12 +426,16 @@ class CaptureService : Service() {
 
                 val pieceText =
                     analysis.pieces.joinToString("-") {
-                        it.cells.size.toString()
+                        it.cells.size.toString() +
+                            "@" +
+                            it.height +
+                            "x" +
+                            it.width
                     }
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.8 LOCK • C:" +
+                    "v1.9 GUARD • C:" +
                         comboCount +
                         " " +
                         batchText +
