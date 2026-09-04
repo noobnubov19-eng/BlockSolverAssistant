@@ -144,7 +144,7 @@ class FrameAnalyzer {
         // Color-independent block detector.
         // The game changes themes: blocks can be green, cyan, purple, blue, etc.
         // Real blocks are bright and saturated; board/tray background is darker.
-        return hsv[1] > 0.50f &&
-            hsv[2] > 0.80f
+        return hsv[1] > 0.42f &&
+            hsv[2] > 0.66f
     }
 }
