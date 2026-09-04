@@ -74,13 +74,15 @@ class FrameAnalyzer {
         bitmap: Bitmap,
         rect: RectF
     ): Array<BooleanArray> {
-        val colors = Array(64) { Rgb(0f, 0f, 0f) }
-        val textures = FloatArray(64)
+        val colors = Array(64) {
+            Rgb(0f, 0f, 0f)
+        }
 
         val cw = rect.width() / 8f
         val ch = rect.height() / 8f
 
         var index = 0
+
         for (r in 0 until 8) {
             for (c in 0 until 8) {
                 val feature = readCellFeature(
@@ -90,82 +92,108 @@ class FrameAnalyzer {
                     cw,
                     ch
                 )
-                colors[index] = feature.color
-                textures[index] = feature.texture
-                index++
+
+                colors[index++] = feature.color
             }
         }
 
-        // IMPORTANT:
-        // Do not use texture to decide occupancy.
-        // Some later themes have a textured empty board and raw MediaProjection
-        // preserves that texture more strongly than a saved JPEG screenshot.
+        // The board may be mostly EMPTY or mostly FILLED.
+        // So "largest color cluster = empty" is not reliable.
         //
-        // Instead find the densest RGB cluster among the 64 cell medians.
-        // Empty slots share almost the same median color even when the theme changes,
-        // while occupied blocks are colored outliers.
+        // Grid/gap pixels always belong to the board theme, never to a block.
+        // We find all tight cell-color clusters and select the cluster whose
+        // HUE/SATURATION is most compatible with those grid pixels, while also
+        // preferring a cluster that contains many cells.
+        //
+        // This fixes the cyan theme where 40/64 cells can be filled with
+        // same-color blocks, and the light-purple theme where the empty board
+        // is much brighter than its grid lines.
+        val gridReference =
+            sampleGridReference(
+                bitmap,
+                rect,
+                cw,
+                ch
+            )
+
+        val gridHsv = hsv(gridReference)
         val clusterRadius = 0.060f
 
-        var bestIndex = 0
-        var bestCount = -1
-        var bestTexture = Float.MAX_VALUE
+        var bestReference = colors[0]
+        var bestScore = Float.MAX_VALUE
 
         for (i in colors.indices) {
+            var sr = 0f
+            var sg = 0f
+            var sb = 0f
             var count = 0
 
             for (j in colors.indices) {
                 if (
-                    distance(colors[i], colors[j]) <=
-                    clusterRadius
+                    distance(
+                        colors[i],
+                        colors[j]
+                    ) <= clusterRadius
                 ) {
+                    sr += colors[j].r
+                    sg += colors[j].g
+                    sb += colors[j].b
                     count++
                 }
             }
 
-            if (
-                count > bestCount ||
-                (
-                    count == bestCount &&
-                    textures[i] < bestTexture
+            if (count == 0) {
+                continue
+            }
+
+            val center = Rgb(
+                sr / count,
+                sg / count,
+                sb / count
+            )
+
+            val centerHsv = hsv(center)
+
+            val rawHueDiff =
+                kotlin.math.abs(
+                    centerHsv[0] -
+                        gridHsv[0]
                 )
-            ) {
-                bestIndex = i
-                bestCount = count
-                bestTexture = textures[i]
+
+            val hueDiff =
+                minOf(
+                    rawHueDiff,
+                    1f - rawHueDiff
+                )
+
+            val hueWeight =
+                minOf(
+                    1f,
+                    (
+                        centerHsv[1] +
+                            gridHsv[1]
+                        ) / 0.60f
+                )
+
+            val score =
+                hueDiff * 2.20f *
+                    hueWeight +
+                kotlin.math.abs(
+                    centerHsv[1] -
+                        gridHsv[1]
+                ) * 0.55f +
+                kotlin.math.abs(
+                    centerHsv[2] -
+                        gridHsv[2]
+                ) * 0.20f -
+                minOf(count, 64) * 0.020f
+
+            if (score < bestScore) {
+                bestScore = score
+                bestReference = center
             }
         }
 
-        // Average only the dense cluster to get the current empty-cell reference.
-        var sr = 0f
-        var sg = 0f
-        var sb = 0f
-        var n = 0
-
-        for (color in colors) {
-            if (
-                distance(color, colors[bestIndex]) <=
-                clusterRadius
-            ) {
-                sr += color.r
-                sg += color.g
-                sb += color.b
-                n++
-            }
-        }
-
-        val emptyReference =
-            if (n > 0) {
-                Rgb(
-                    sr / n,
-                    sg / n,
-                    sb / n
-                )
-            } else {
-                colors[bestIndex]
-            }
-
-        // Empty slots in all captured themes are extremely tightly clustered.
-        // 0.095 leaves a large safety margin while still separating colored blocks.
         val occupiedThreshold = 0.095f
 
         val out = Array(8) {
@@ -179,13 +207,131 @@ class FrameAnalyzer {
                 out[r][c] =
                     distance(
                         colors[index],
-                        emptyReference
+                        bestReference
                     ) > occupiedThreshold
 
                 index++
             }
         }
 
+        return out
+    }
+
+    private fun sampleGridReference(
+        bitmap: Bitmap,
+        rect: RectF,
+        cw: Float,
+        ch: Float
+    ): Rgb {
+        val rs = ArrayList<Float>(112)
+        val gs = ArrayList<Float>(112)
+        val bs = ArrayList<Float>(112)
+
+        // Midpoints of internal vertical grid gaps.
+        for (c in 1 until 8) {
+            val x =
+                (rect.left + c * cw)
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        bitmap.width - 1
+                    )
+
+            for (r in 0 until 8) {
+                val y =
+                    (
+                        rect.top +
+                            (r + 0.5f) * ch
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            bitmap.height - 1
+                        )
+
+                val p =
+                    rgb(
+                        bitmap.getPixel(
+                            x,
+                            y
+                        )
+                    )
+
+                rs += p.r
+                gs += p.g
+                bs += p.b
+            }
+        }
+
+        // Midpoints of internal horizontal grid gaps.
+        for (r in 1 until 8) {
+            val y =
+                (rect.top + r * ch)
+                    .toInt()
+                    .coerceIn(
+                        0,
+                        bitmap.height - 1
+                    )
+
+            for (c in 0 until 8) {
+                val x =
+                    (
+                        rect.left +
+                            (c + 0.5f) * cw
+                        )
+                        .toInt()
+                        .coerceIn(
+                            0,
+                            bitmap.width - 1
+                        )
+
+                val p =
+                    rgb(
+                        bitmap.getPixel(
+                            x,
+                            y
+                        )
+                    )
+
+                rs += p.r
+                gs += p.g
+                bs += p.b
+            }
+        }
+
+        rs.sort()
+        gs.sort()
+        bs.sort()
+
+        val mid = rs.size / 2
+
+        return Rgb(
+            rs[mid],
+            gs[mid],
+            bs[mid]
+        )
+    }
+
+    private fun hsv(
+        color: Rgb
+    ): FloatArray {
+        val out = FloatArray(3)
+
+        Color.RGBToHSV(
+            (color.r * 255f)
+                .roundToInt()
+                .coerceIn(0, 255),
+            (color.g * 255f)
+                .roundToInt()
+                .coerceIn(0, 255),
+            (color.b * 255f)
+                .roundToInt()
+                .coerceIn(0, 255),
+            out
+        )
+
+        // Android hue is 0..360. Normalize to 0..1.
+        out[0] /= 360f
         return out
     }
 
@@ -279,43 +425,117 @@ class FrameAnalyzer {
                 y1
             )
 
-            // Use only STRONG color outliers to define the piece bounding box.
-            // This avoids tray texture/shadows enlarging or shrinking the shape.
-            val strongPoints = ArrayList<Pair<Int, Int>>()
+            // Build density profiles instead of using raw extrema.
+            // A textured theme can create many isolated "strong" pixels far from
+            // the real piece. Those pixels used to make a vertical 1x5 look like
+            // a disconnected 5x4 shape and the whole piece was then discarded.
+            val sampleWidth =
+                ((x1 - x0) + 1) / 2
+
+            val sampleHeight =
+                ((y1 - y0) + 1) / 2
+
+            val colCounts =
+                IntArray(
+                    sampleWidth + 1
+                )
+
+            val rowCounts =
+                IntArray(
+                    sampleHeight + 1
+                )
+
+            var strongCount = 0
 
             for (y in y0 until y1 step 2) {
+                val ry = (y - y0) / 2
+
                 for (x in x0 until x1 step 2) {
                     val d = distance(
-                        rgb(bitmap.getPixel(x, y)),
+                        rgb(
+                            bitmap.getPixel(
+                                x,
+                                y
+                            )
+                        ),
                         background
                     )
 
                     if (d > 0.115f) {
-                        strongPoints += x to y
+                        val cx =
+                            (x - x0) / 2
+
+                        colCounts[cx]++
+                        rowCounts[ry]++
+                        strongCount++
                     }
                 }
             }
 
-            if (strongPoints.size < 35) {
+            if (strongCount < 35) {
                 continue
             }
 
-            val xs = strongPoints.map { it.first }.sorted()
-            val ys = strongPoints.map { it.second }.sorted()
+            val maxCol =
+                colCounts.maxOrNull() ?: 0
 
-            // Ignore a tiny fraction of isolated glow/shadow pixels.
-            val trimX = (xs.size * 0.015f)
-                .toInt()
-                .coerceIn(0, max(0, xs.size / 8))
+            val maxRow =
+                rowCounts.maxOrNull() ?: 0
 
-            val trimY = (ys.size * 0.015f)
-                .toInt()
-                .coerceIn(0, max(0, ys.size / 8))
+            val colThreshold =
+                maxOf(
+                    3,
+                    (maxCol * 0.25f)
+                        .roundToInt()
+                )
 
-            val minX = xs[trimX]
-            val maxX = xs[xs.lastIndex - trimX]
-            val minY = ys[trimY]
-            val maxY = ys[ys.lastIndex - trimY]
+            val rowThreshold =
+                maxOf(
+                    3,
+                    (maxRow * 0.25f)
+                        .roundToInt()
+                )
+
+            val firstCol =
+                colCounts.indexOfFirst {
+                    it >= colThreshold
+                }
+
+            val lastCol =
+                colCounts.indexOfLast {
+                    it >= colThreshold
+                }
+
+            val firstRow =
+                rowCounts.indexOfFirst {
+                    it >= rowThreshold
+                }
+
+            val lastRow =
+                rowCounts.indexOfLast {
+                    it >= rowThreshold
+                }
+
+            if (
+                firstCol < 0 ||
+                lastCol < firstCol ||
+                firstRow < 0 ||
+                lastRow < firstRow
+            ) {
+                continue
+            }
+
+            val minX =
+                x0 + firstCol * 2
+
+            val maxX =
+                x0 + lastCol * 2
+
+            val minY =
+                y0 + firstRow * 2
+
+            val maxY =
+                y0 + lastRow * 2
 
             val boxW = (maxX - minX + 1).toFloat()
             val boxH = (maxY - minY + 1).toFloat()
