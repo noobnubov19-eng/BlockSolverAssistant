@@ -176,16 +176,20 @@ class FrameAnalyzer {
                 )
 
             val score =
-                hueDiff * 2.20f *
+                distance(
+                    center,
+                    gridReference
+                ) * 1.00f +
+                hueDiff * 0.35f *
                     hueWeight +
                 kotlin.math.abs(
                     centerHsv[1] -
                         gridHsv[1]
-                ) * 0.55f +
+                ) * 0.10f +
                 kotlin.math.abs(
                     centerHsv[2] -
                         gridHsv[2]
-                ) * 0.20f
+                ) * 0.10f
 
             if (score < bestScore) {
                 bestScore = score
@@ -411,7 +415,6 @@ class FrameAnalyzer {
         )
 
         val result = mutableListOf<Piece>()
-        val step = 2
 
         for (range in ranges) {
             val x0 = range.first.coerceAtLeast(0)
@@ -425,260 +428,146 @@ class FrameAnalyzer {
                 y1
             )
 
-            val gw =
+            // Build horizontal/vertical foreground density profiles.
+            // This keeps all tiles of a polyomino together even though
+            // the visual seams between adjacent glossy blocks are dark.
+            val step = 2
+            val colCounts = IntArray(
                 ((x1 - x0) + step - 1) / step
-
-            val gh =
+            )
+            val rowCounts = IntArray(
                 ((y1 - y0) + step - 1) / step
-
-            val mask = Array(gh) {
-                BooleanArray(gw)
-            }
-
-            for (gy in 0 until gh) {
-                val y =
-                    (y0 + gy * step)
-                        .coerceAtMost(h - 1)
-
-                for (gx in 0 until gw) {
-                    val x =
-                        (x0 + gx * step)
-                            .coerceAtMost(w - 1)
-
-                    mask[gy][gx] =
-                        distance(
-                            rgb(
-                                bitmap.getPixel(
-                                    x,
-                                    y
-                                )
-                            ),
-                            background
-                        ) > 0.075f
-                }
-            }
-
-            val seen = Array(gh) {
-                BooleanArray(gw)
-            }
-
-            var bestPoints:
-                MutableList<Cell>? = null
-
-            val neighbours = arrayOf(
-                -1 to -1,
-                -1 to 0,
-                -1 to 1,
-                0 to -1,
-                0 to 1,
-                1 to -1,
-                1 to 0,
-                1 to 1
             )
 
-            for (gy in 0 until gh) {
-                for (gx in 0 until gw) {
-                    if (
-                        !mask[gy][gx] ||
-                        seen[gy][gx]
-                    ) {
-                        continue
-                    }
+            var strongCount = 0
 
-                    val queue =
-                        ArrayDeque<Cell>()
+            for (y in y0 until y1 step step) {
+                val ry = (y - y0) / step
 
-                    val points =
-                        mutableListOf<Cell>()
-
-                    queue.addLast(
-                        Cell(gy, gx)
+                for (x in x0 until x1 step step) {
+                    val d = distance(
+                        rgb(bitmap.getPixel(x, y)),
+                        background
                     )
 
-                    seen[gy][gx] = true
-
-                    while (
-                        queue.isNotEmpty()
-                    ) {
-                        val p =
-                            queue.removeFirst()
-
-                        points += p
-
-                        for (
-                            delta in neighbours
-                        ) {
-                            val ny =
-                                p.r + delta.first
-
-                            val nx =
-                                p.c + delta.second
-
-                            if (
-                                ny in 0 until gh &&
-                                nx in 0 until gw &&
-                                mask[ny][nx] &&
-                                !seen[ny][nx]
-                            ) {
-                                seen[ny][nx] = true
-                                queue.addLast(
-                                    Cell(ny, nx)
-                                )
-                            }
-                        }
-                    }
-
-                    if (
-                        bestPoints == null ||
-                        points.size >
-                        bestPoints!!.size
-                    ) {
-                        bestPoints = points
+                    if (d > 0.105f) {
+                        val cx = (x - x0) / step
+                        colCounts[cx]++
+                        rowCounts[ry]++
+                        strongCount++
                     }
                 }
             }
 
-            val component =
-                bestPoints ?: continue
-
-            // Tiny components are theme noise / glow.
-            if (component.size < 100) {
+            if (strongCount < 35) {
                 continue
             }
 
-            val minGX =
-                component.minOf {
-                    it.c
-                }
+            val maxCol = colCounts.maxOrNull() ?: 0
+            val maxRow = rowCounts.maxOrNull() ?: 0
 
-            val maxGX =
-                component.maxOf {
-                    it.c
-                }
+            val colThreshold = maxOf(
+                3,
+                (maxCol * 0.24f).roundToInt()
+            )
 
-            val minGY =
-                component.minOf {
-                    it.r
-                }
+            val rowThreshold = maxOf(
+                3,
+                (maxRow * 0.24f).roundToInt()
+            )
 
-            val maxGY =
-                component.maxOf {
-                    it.r
-                }
+            val colRun = dominantRun(
+                colCounts,
+                colThreshold
+            )
 
-            val boxW =
-                (maxGX - minGX + 1) *
-                    step.toFloat()
+            val rowRun = dominantRun(
+                rowCounts,
+                rowThreshold
+            )
 
-            val boxH =
-                (maxGY - minGY + 1) *
-                    step.toFloat()
-
-            val pitch = w / 20f
-
-            val cols =
-                (boxW / pitch)
-                    .roundToInt()
-                    .coerceIn(1, 5)
-
-            val rows =
-                (boxH / pitch)
-                    .roundToInt()
-                    .coerceIn(1, 5)
-
-            val componentMask =
-                Array(gh) {
-                    BooleanArray(gw)
-                }
-
-            for (p in component) {
-                componentMask[p.r][p.c] =
-                    true
+            if (
+                colRun == null ||
+                rowRun == null
+            ) {
+                continue
             }
 
-            val cells =
-                mutableSetOf<Cell>()
+            val minX = x0 + colRun.first * step
+            val maxX = x0 + colRun.last * step
+            val minY = y0 + rowRun.first * step
+            val maxY = y0 + rowRun.last * step
 
+            val boxW = (maxX - minX + 1).toFloat()
+            val boxH = (maxY - minY + 1).toFloat()
+            val pitch = w / 20f
+
+            val cols = (boxW / pitch)
+                .roundToInt()
+                .coerceIn(1, 5)
+
+            val rows = (boxH / pitch)
+                .roundToInt()
+                .coerceIn(1, 5)
+
+            val cells = mutableSetOf<Cell>()
+
+            // Decide each inferred tile from coverage across its interior,
+            // never from one pixel. This is stable for T/L/J shapes.
             for (r in 0 until rows) {
                 for (c in 0 until cols) {
-                    val sx0 =
-                        (
-                            minGX +
-                                c *
-                                (maxGX - minGX + 1)
-                                .toFloat() /
-                                cols
-                            )
-                            .roundToInt()
+                    val left =
+                        minX + c * boxW / cols
 
-                    val sx1 =
-                        (
-                            minGX +
-                                (c + 1) *
-                                (maxGX - minGX + 1)
-                                .toFloat() /
-                                cols
-                            )
-                            .roundToInt()
+                    val right =
+                        minX + (c + 1) * boxW / cols
 
-                    val sy0 =
-                        (
-                            minGY +
-                                r *
-                                (maxGY - minGY + 1)
-                                .toFloat() /
-                                rows
-                            )
-                            .roundToInt()
+                    val top =
+                        minY + r * boxH / rows
 
-                    val sy1 =
-                        (
-                            minGY +
-                                (r + 1) *
-                                (maxGY - minGY + 1)
-                                .toFloat() /
-                                rows
-                            )
-                            .roundToInt()
+                    val bottom =
+                        minY + (r + 1) * boxH / rows
+
+                    val marginX =
+                        (right - left) * 0.16f
+
+                    val marginY =
+                        (bottom - top) * 0.16f
+
+                    val sx0 = (left + marginX).toInt()
+                    val sx1 = (right - marginX).toInt()
+                    val sy0 = (top + marginY).toInt()
+                    val sy1 = (bottom - marginY).toInt()
 
                     var total = 0
                     var foreground = 0
 
-                    for (
-                        yy in
-                        sy0 until sy1
-                    ) {
-                        for (
-                            xx in
-                            sx0 until sx1
-                        ) {
-                            if (
-                                yy in 0 until gh &&
-                                xx in 0 until gw
-                            ) {
-                                total++
+                    for (yy in sy0..sy1 step 2) {
+                        for (xx in sx0..sx1 step 2) {
+                            total++
 
-                                if (
-                                    componentMask[yy][xx]
-                                ) {
-                                    foreground++
-                                }
+                            val px = xx.coerceIn(0, w - 1)
+                            val py = yy.coerceIn(0, h - 1)
+
+                            if (
+                                distance(
+                                    rgb(bitmap.getPixel(px, py)),
+                                    background
+                                ) > 0.060f
+                            ) {
+                                foreground++
                             }
                         }
                     }
 
                     val coverage =
                         if (total > 0) {
-                            foreground
-                                .toFloat() /
-                                total
+                            foreground.toFloat() / total
                         } else {
                             0f
                         }
 
-                    // Real tiles cover ~90% of their inferred cell;
-                    // bevel bleed into an empty neighbour stays below ~30%.
-                    if (coverage > 0.45f) {
+                    if (coverage > 0.24f) {
                         cells += Cell(r, c)
                     }
                 }
@@ -689,13 +578,75 @@ class FrameAnalyzer {
                 cells.size <= 9 &&
                 isConnected(cells)
             ) {
-                result +=
-                    Piece(cells)
-                        .normalized()
+                result += Piece(cells).normalized()
             }
         }
 
         return result
+    }
+
+    private fun dominantRun(
+        counts: IntArray,
+        threshold: Int
+    ): IntRange? {
+        var bestStart = -1
+        var bestEnd = -1
+        var bestMass = -1
+        var i = 0
+
+        // Tiny seams between adjacent blocks can produce a few low bins.
+        val allowedGap = 3
+
+        while (i < counts.size) {
+            while (
+                i < counts.size &&
+                counts[i] < threshold
+            ) {
+                i++
+            }
+
+            if (i >= counts.size) {
+                break
+            }
+
+            val start = i
+            var lastActive = i
+            var mass = 0
+            var gap = 0
+
+            while (i < counts.size) {
+                if (counts[i] >= threshold) {
+                    mass += counts[i]
+                    lastActive = i
+                    gap = 0
+                } else {
+                    gap++
+
+                    if (gap > allowedGap) {
+                        break
+                    }
+                }
+
+                i++
+            }
+
+            if (mass > bestMass) {
+                bestMass = mass
+                bestStart = start
+                bestEnd = lastActive
+            }
+
+            i = maxOf(i, start + 1)
+        }
+
+        return if (
+            bestStart >= 0 &&
+            bestEnd >= bestStart
+        ) {
+            bestStart..bestEnd
+        } else {
+            null
+        }
     }
 
     private fun isConnected(cells: Set<Cell>): Boolean {
