@@ -17,8 +17,7 @@ class Solver(private val size: Int = 8) {
     private data class Key(
         val board: Long,
         val remainingMask: Int,
-        val combo: Int,
-        val gap: Int
+        val clearedInBatch: Boolean
     )
 
     private data class Candidate(
@@ -31,8 +30,7 @@ class Solver(private val size: Int = 8) {
         val pieceIndex: Int,
         val candidate: Candidate,
         val lines: Int,
-        val nextCombo: Int,
-        val nextGap: Int
+        val nextBatchCleared: Boolean
     )
 
     private data class FutureShape(
@@ -68,7 +66,7 @@ class Solver(private val size: Int = 8) {
         initial: Array<BooleanArray>,
         pieces: List<Piece>,
         comboCount: Int = 0,
-        movesSinceClear: Int = 0
+        batchCleared: Boolean = false
     ): Solution? {
         if (pieces.isEmpty() || pieces.size > 3) return null
         if (pieces.any { it.cells.isEmpty() }) return null
@@ -87,45 +85,43 @@ class Solver(private val size: Int = 8) {
 
         fun terminalScore(
             board: Long,
-            combo: Int,
-            gap: Int
+            clearedInBatch: Boolean
         ): Double {
             val base = evalCache.getOrPut(board) {
                 evaluateBoard(board)
             }
 
-            val comboValue =
-                if (combo > 0) {
-                    min(combo, 30) * 42.0 -
-                        gap * 120.0
+            val comboContinuity =
+                if (clearedInBatch) {
+                    2200.0 +
+                        min(comboCount, 40) * 120.0 +
+                        nextBatchSetupPotential(board)
+                } else if (comboCount > 0) {
+                    -18000.0 -
+                        min(comboCount, 40) * 650.0
                 } else {
-                    0.0
+                    -4500.0
                 }
 
-            return base + comboValue
+            return base + comboContinuity
         }
 
         fun search(
             board: Long,
             remainingMask: Int,
-            combo: Int,
-            gap: Int
+            clearedInBatch: Boolean
         ): Double {
-            val safeCombo = combo.coerceIn(0, 60)
-            val safeGap = gap.coerceIn(0, 2)
             val key = Key(
                 board,
                 remainingMask,
-                safeCombo,
-                safeGap
+                clearedInBatch
             )
             memo[key]?.let { return it }
 
             if (remainingMask == 0) {
                 val score = terminalScore(
                     board,
-                    safeCombo,
-                    safeGap
+                    clearedInBatch
                 )
                 memo[key] = score
                 return score
@@ -149,45 +145,28 @@ class Solver(private val size: Int = 8) {
                     val nextBoard = clear.first
                     val clearedLines = clear.second
 
-                    val transition = nextComboState(
-                        safeCombo,
-                        safeGap,
-                        clearedLines
-                    )
-
-                    val nextCombo = transition.first
-                    val nextGap = transition.second
-                    val lostCombo = transition.third
+                    val nextBatchCleared =
+                        clearedInBatch || clearedLines > 0
 
                     val child = search(
                         nextBoard,
                         remainingMask and pieceBit.inv(),
-                        nextCombo,
-                        nextGap
+                        nextBatchCleared
                     )
                     if (child == Double.NEGATIVE_INFINITY) continue
 
                     val clearBonus = estimatedClearValue(
                         clearedLines,
-                        nextCombo
+                        comboCount
                     )
 
-                    val comboLossPenalty =
-                        if (lostCombo) {
-                            2100.0 +
-                                min(safeCombo, 25) * 115.0
-                        } else {
-                            0.0
-                        }
-
-                    val rescueBonus =
+                    val firstClearBonus =
                         if (
-                            clearedLines > 0 &&
-                            safeCombo > 0 &&
-                            safeGap == 2
+                            !clearedInBatch &&
+                            clearedLines > 0
                         ) {
-                            1350.0 +
-                                min(safeCombo, 25) * 70.0
+                            3600.0 +
+                                min(comboCount, 35) * 180.0
                         } else {
                             0.0
                         }
@@ -195,8 +174,7 @@ class Solver(private val size: Int = 8) {
                     val score =
                         child +
                         clearBonus +
-                        rescueBonus -
-                        comboLossPenalty
+                        firstClearBonus
 
                     if (score > bestScore) {
                         bestScore = score
@@ -204,8 +182,7 @@ class Solver(private val size: Int = 8) {
                             pieceIndex,
                             candidate,
                             clearedLines,
-                            nextCombo,
-                            nextGap
+                            nextBatchCleared
                         )
                     }
                 }
@@ -216,32 +193,25 @@ class Solver(private val size: Int = 8) {
             return bestScore
         }
 
-        val initialCombo = comboCount.coerceAtLeast(0)
-        val initialGap = movesSinceClear.coerceIn(0, 2)
-
         val bestScore = search(
             startBoard,
             allMask,
-            initialCombo,
-            initialGap
+            batchCleared
         )
         if (bestScore == Double.NEGATIVE_INFINITY) return null
 
         val steps = mutableListOf<Placement>()
         var board = startBoard
         var remainingMask = allMask
-        var combo = initialCombo
-        var gap = initialGap
+        var clearedInBatch = batchCleared
         var firstMoveLines = 0
-        var projectedCombo = combo
-        var projectedGap = gap
+        var projectedBatchCleared = clearedInBatch
 
         while (remainingMask != 0) {
             val key = Key(
                 board,
                 remainingMask,
-                combo.coerceIn(0, 60),
-                gap.coerceIn(0, 2)
+                clearedInBatch
             )
             val choice = choices[key] ?: break
             val piece = normalized[choice.pieceIndex]
@@ -256,8 +226,8 @@ class Solver(private val size: Int = 8) {
 
             if (steps.isEmpty()) {
                 firstMoveLines = choice.lines
-                projectedCombo = choice.nextCombo
-                projectedGap = choice.nextGap
+                projectedBatchCleared =
+                    choice.nextBatchCleared
             }
 
             steps += Placement(
@@ -271,8 +241,8 @@ class Solver(private val size: Int = 8) {
             remainingMask =
                 remainingMask and (1 shl choice.pieceIndex).inv()
 
-            combo = choice.nextCombo
-            gap = choice.nextGap
+            clearedInBatch =
+                choice.nextBatchCleared
         }
 
         return if (steps.isEmpty()) {
@@ -282,41 +252,17 @@ class Solver(private val size: Int = 8) {
                 steps = steps,
                 score = bestScore,
                 firstMoveLines = firstMoveLines,
-                projectedCombo = projectedCombo,
-                projectedGap = projectedGap
+                projectedCombo = comboCount,
+                projectedGap = 0,
+                projectedBatchCleared =
+                    projectedBatchCleared
             )
-        }
-    }
-
-    private fun nextComboState(
-        combo: Int,
-        gap: Int,
-        lines: Int
-    ): Triple<Int, Int, Boolean> {
-        if (lines > 0) {
-            return Triple(
-                if (combo > 0) combo + 1 else 1,
-                0,
-                false
-            )
-        }
-
-        if (combo <= 0) {
-            return Triple(0, 0, false)
-        }
-
-        val nextGap = gap + 1
-
-        return if (nextGap >= 3) {
-            Triple(0, 0, true)
-        } else {
-            Triple(combo, nextGap, false)
         }
     }
 
     private fun estimatedClearValue(
         lines: Int,
-        nextCombo: Int
+        comboCount: Int
     ): Double {
         if (lines <= 0) return 0.0
 
@@ -330,11 +276,73 @@ class Solver(private val size: Int = 8) {
         }
 
         val multiplier =
-            (nextCombo + 1)
-                .coerceAtMost(35)
+            (comboCount + 2)
+                .coerceAtMost(40)
                 .toDouble()
 
-        return base * multiplier * 5.2
+        val multiLineExtra =
+            when (lines) {
+                1 -> 0.0
+                2 -> 500.0
+                3 -> 1500.0
+                4 -> 3200.0
+                5 -> 5200.0
+                else -> 7000.0
+            }
+
+        return base * multiplier * 4.6 +
+            multiLineExtra
+    }
+
+    private fun nextBatchSetupPotential(
+        board: Long
+    ): Double {
+        var bonus = 0.0
+        val rowCounts = IntArray(8)
+        val colCounts = IntArray(8)
+
+        for (r in 0 until 8) {
+            rowCounts[r] =
+                bitCount(board and rowMasks[r])
+        }
+
+        for (c in 0 until 8) {
+            colCounts[c] =
+                bitCount(board and colMasks[c])
+        }
+
+        for (r in 0 until 8) {
+            bonus += when (rowCounts[r]) {
+                7 -> 260.0
+                6 -> 90.0
+                5 -> 28.0
+                else -> 0.0
+            }
+        }
+
+        for (c in 0 until 8) {
+            bonus += when (colCounts[c]) {
+                7 -> 260.0
+                6 -> 90.0
+                5 -> 28.0
+                else -> 0.0
+            }
+        }
+
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                if ((board and bit(r, c)) != 0L) continue
+
+                if (
+                    rowCounts[r] == 7 &&
+                    colCounts[c] == 7
+                ) {
+                    bonus += 900.0
+                }
+            }
+        }
+
+        return bonus
     }
 
     private fun buildCandidates(piece: Piece): List<Candidate> {
