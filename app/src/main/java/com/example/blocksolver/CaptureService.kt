@@ -151,7 +151,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.3 ROBUST • захват запущен"
+            "v1.4 EXACT • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -270,7 +270,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.3 ROBUST • ждём фигуры",
+                    "v1.4 EXACT • ждём фигуры",
                     null
                 )
             }
@@ -287,6 +287,16 @@ class CaptureService : Service() {
 
         if (hash == lastHash) {
             return
+        }
+
+        // Never leave an OLD move on screen while a new piece/state is appearing.
+        // A stale overlay is more dangerous than showing no move for ~0.2 s.
+        overlayView?.post {
+            overlayView?.showStatus(
+                overlayRect,
+                "v1.4 EXACT • проверяю...",
+                null
+            )
         }
 
         if (hash == candidateHash) {
@@ -322,7 +332,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.3 ROBUST • RETRY • $shapes • occ:$occupied",
+                    "v1.4 EXACT • RETRY • $shapes • occ:$occupied",
                     null
                 )
 
@@ -332,7 +342,7 @@ class CaptureService : Service() {
             } else {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.3 ROBUST • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
+                    "v1.4 EXACT • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
                     solution
                 )
             }
