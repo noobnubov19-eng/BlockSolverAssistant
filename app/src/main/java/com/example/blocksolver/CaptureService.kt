@@ -46,6 +46,11 @@ class CaptureService : Service() {
     private var candidateHash = ""
     private var candidateSeen = 0
 
+    private var comboCount = 0
+    private var movesSinceClear = 0
+    private var pendingLines: Int? = null
+    private var pendingStateHash: String? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -151,7 +156,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.4 EXACT • захват запущен"
+            "v1.5 SCORE • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -270,7 +275,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.4 EXACT • ждём фигуры",
+                    "v1.5 SCORE • ждём фигуры",
                     null
                 )
             }
@@ -289,12 +294,37 @@ class CaptureService : Service() {
             return
         }
 
+        val previousHintHash = pendingStateHash
+        val previousHintLines = pendingLines
+
+        if (
+            previousHintHash != null &&
+            previousHintLines != null &&
+            previousHintHash != hash
+        ) {
+            if (previousHintLines > 0) {
+                comboCount =
+                    if (comboCount > 0) comboCount + 1 else 1
+                movesSinceClear = 0
+            } else if (comboCount > 0) {
+                movesSinceClear++
+
+                if (movesSinceClear >= 3) {
+                    comboCount = 0
+                    movesSinceClear = 0
+                }
+            }
+
+            pendingStateHash = null
+            pendingLines = null
+        }
+
         // Never leave an OLD move on screen while a new piece/state is appearing.
         // A stale overlay is more dangerous than showing no move for ~0.2 s.
         overlayView?.post {
             overlayView?.showStatus(
                 overlayRect,
-                "v1.4 EXACT • проверяю...",
+                "v1.5 SCORE • проверяю...",
                 null
             )
         }
@@ -317,7 +347,9 @@ class CaptureService : Service() {
 
         val solution = solver.solve(
             analysis.board,
-            analysis.pieces
+            analysis.pieces,
+            comboCount = comboCount,
+            movesSinceClear = movesSinceClear
         )
 
         overlayView?.post {
@@ -332,17 +364,47 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.4 EXACT • RETRY • $shapes • occ:$occupied",
+                    "v1.5 SCORE • RETRY • $shapes • occ:$occupied",
                     null
                 )
+
+                pendingLines = null
+                pendingStateHash = null
 
                 // Never permanently cache a no-solution frame.
                 // A theme transition/animation can briefly produce a bad read.
                 lastHash = ""
             } else {
+                pendingLines = solution.firstMoveLines
+                pendingStateHash = hash
+
+                val comboText =
+                    if (comboCount > 0) {
+                        "C:" + comboCount +
+                            " G:" + movesSinceClear
+                    } else {
+                        "C:0"
+                    }
+
+                val lineText =
+                    if (solution.firstMoveLines > 0) {
+                        " L:" + solution.firstMoveLines
+                    } else {
+                        ""
+                    }
+
+                val pieceText =
+                    analysis.pieces.joinToString("-") {
+                        it.cells.size.toString()
+                    }
+
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.4 EXACT • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
+                    "v1.5 SCORE • " +
+                        comboText +
+                        lineText +
+                        " • " +
+                        pieceText,
                     solution
                 )
             }
