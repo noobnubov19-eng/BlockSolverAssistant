@@ -47,9 +47,11 @@ class CaptureService : Service() {
     private var candidateSeen = 0
 
     private var comboCount = 0
-    private var movesSinceClear = 0
+    private var batchCleared = false
+    private var stablePieceCount = 0
     private var pendingLines: Int? = null
     private var pendingStateHash: String? = null
+    private var pendingPieceCount: Int? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -156,7 +158,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.5 SCORE • захват запущен"
+            "v1.6 BATCH • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -275,10 +277,14 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.5 SCORE • ждём фигуры",
+                    "v1.6 BATCH • ждём фигуры",
                     null
                 )
             }
+
+            // Between two 3-piece sets the tray can briefly be empty.
+            // Keep combo/batch state and also keep the pending last move,
+            // because the next stable frame may already contain the new set.
             lastHash = ""
             candidateHash = ""
             candidateSeen = 0
@@ -294,37 +300,11 @@ class CaptureService : Service() {
             return
         }
 
-        val previousHintHash = pendingStateHash
-        val previousHintLines = pendingLines
-
-        if (
-            previousHintHash != null &&
-            previousHintLines != null &&
-            previousHintHash != hash
-        ) {
-            if (previousHintLines > 0) {
-                comboCount =
-                    if (comboCount > 0) comboCount + 1 else 1
-                movesSinceClear = 0
-            } else if (comboCount > 0) {
-                movesSinceClear++
-
-                if (movesSinceClear >= 3) {
-                    comboCount = 0
-                    movesSinceClear = 0
-                }
-            }
-
-            pendingStateHash = null
-            pendingLines = null
-        }
-
-        // Never leave an OLD move on screen while a new piece/state is appearing.
-        // A stale overlay is more dangerous than showing no move for ~0.2 s.
+        // Never leave an old recommendation on screen while the state changes.
         overlayView?.post {
             overlayView?.showStatus(
                 overlayRect,
-                "v1.5 SCORE • проверяю...",
+                "v1.6 BATCH • проверяю...",
                 null
             )
         }
@@ -341,6 +321,57 @@ class CaptureService : Service() {
             return
         }
 
+        val newPieceCount = analysis.pieces.size
+
+        // Apply the PREVIOUS recommendation only after a new state is stable.
+        // This prevents animations/theme changes from falsely advancing combo.
+        val oldPendingHash = pendingStateHash
+        val oldPendingLines = pendingLines
+        val oldPendingCount = pendingPieceCount
+
+        if (
+            oldPendingHash != null &&
+            oldPendingLines != null &&
+            oldPendingHash != hash
+        ) {
+            val beforeCount =
+                oldPendingCount ?: stablePieceCount
+
+            val sameBatchMove =
+                beforeCount in 2..3 &&
+                    newPieceCount == beforeCount - 1
+
+            val newBatchStarted =
+                beforeCount == 1 &&
+                    newPieceCount == 3
+
+            if (sameBatchMove || newBatchStarted) {
+                if (oldPendingLines > 0) {
+                    batchCleared = true
+                }
+
+                if (newBatchStarted) {
+                    // Block Blast combo is treated as one successful clear
+                    // somewhere inside each complete set of three pieces.
+                    if (batchCleared) {
+                        comboCount++
+                    } else {
+                        comboCount = 0
+                    }
+
+                    // We are now at the start of the next 3-piece set.
+                    batchCleared = false
+                }
+            }
+
+            // Whether it was a real move or merely a theme/read change,
+            // the old hint must not be applied twice.
+            pendingLines = null
+            pendingStateHash = null
+            pendingPieceCount = null
+        }
+
+        stablePieceCount = newPieceCount
         lastHash = hash
         candidateHash = ""
         candidateSeen = 0
@@ -349,7 +380,7 @@ class CaptureService : Service() {
             analysis.board,
             analysis.pieces,
             comboCount = comboCount,
-            movesSinceClear = movesSinceClear
+            batchCleared = batchCleared
         )
 
         overlayView?.post {
@@ -364,26 +395,26 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.5 SCORE • RETRY • $shapes • occ:$occupied",
+                    "v1.6 BATCH • RETRY • $shapes • occ:$occupied",
                     null
                 )
 
                 pendingLines = null
                 pendingStateHash = null
+                pendingPieceCount = null
 
-                // Never permanently cache a no-solution frame.
-                // A theme transition/animation can briefly produce a bad read.
+                // Re-read instead of permanently caching a bad frame.
                 lastHash = ""
             } else {
                 pendingLines = solution.firstMoveLines
                 pendingStateHash = hash
+                pendingPieceCount = newPieceCount
 
-                val comboText =
-                    if (comboCount > 0) {
-                        "C:" + comboCount +
-                            " G:" + movesSinceClear
+                val batchText =
+                    if (batchCleared) {
+                        "B:OK"
                     } else {
-                        "C:0"
+                        "B:NEED"
                     }
 
                 val lineText =
@@ -400,8 +431,12 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.5 SCORE • " +
-                        comboText +
+                    "v1.6 BATCH • C:" +
+                        comboCount +
+                        " " +
+                        batchText +
+                        " R:" +
+                        newPieceCount +
                         lineText +
                         " • " +
                         pieceText,
