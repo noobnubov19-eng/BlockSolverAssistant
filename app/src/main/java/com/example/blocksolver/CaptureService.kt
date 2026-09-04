@@ -43,6 +43,8 @@ class CaptureService : Service() {
 
     private var lastAnalyzeMs = 0L
     private var lastHash = ""
+    private var candidateHash = ""
+    private var candidateSeen = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -149,7 +151,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.0 SURVIVAL • захват запущен"
+            "v1.1 STABLE • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -268,11 +270,13 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.0 SURVIVAL • ждём фигуры",
+                    "v1.1 STABLE • ждём фигуры",
                     null
                 )
             }
             lastHash = ""
+            candidateHash = ""
+            candidateSeen = 0
             return
         }
 
@@ -285,7 +289,21 @@ class CaptureService : Service() {
             return
         }
 
+        if (hash == candidateHash) {
+            candidateSeen++
+        } else {
+            candidateHash = hash
+            candidateSeen = 1
+            return
+        }
+
+        if (candidateSeen < 2) {
+            return
+        }
+
         lastHash = hash
+        candidateHash = ""
+        candidateSeen = 0
 
         val solution = solver.solve(
             analysis.board,
@@ -296,13 +314,13 @@ class CaptureService : Service() {
             if (solution == null) {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.0 SURVIVAL • хода нет",
+                    "v1.1 STABLE • хода нет",
                     null
                 )
             } else {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.0 SURVIVAL • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
+                    "v1.1 STABLE • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
                     solution
                 )
             }
