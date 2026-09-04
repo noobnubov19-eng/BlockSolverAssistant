@@ -21,13 +21,12 @@ class FrameAnalyzer {
         val boardRect: RectF
     )
 
-    fun analyze(bitmap: Bitmap): Analysis? {
+    fun analyze(bitmap: Bitmap): Analysis {
         val w = bitmap.width.toFloat()
         val h = bitmap.height.toFloat()
         val boardRect = RectF(BOARD_LEFT*w, BOARD_TOP*h, BOARD_RIGHT*w, BOARD_BOTTOM*h)
         val board = readBoard(bitmap, boardRect)
         val pieces = readPieces(bitmap, RectF(0f, TRAY_TOP*h, w, TRAY_BOTTOM*h))
-        if (pieces.size != 3) return null
         return Analysis(board, pieces, boardRect)
     }
 
@@ -69,23 +68,38 @@ class FrameAnalyzer {
         val seen = Array(gh) { BooleanArray(gw) }
         val blobs = mutableListOf<Box>()
         val dirs = arrayOf(1 to 0,-1 to 0,0 to 1,0 to -1)
+
         for (gy in 0 until gh) for (gx in 0 until gw) {
             if (!mask[gy][gx] || seen[gy][gx]) continue
             val q = ArrayDeque<Pair<Int,Int>>()
-            q += gx to gy; seen[gy][gx] = true
+            q += gx to gy
+            seen[gy][gx] = true
             var minX=gx; var maxX=gx; var minY=gy; var maxY=gy; var cnt=0
+
             while(q.isNotEmpty()) {
-                val (xx,yy)=q.removeFirst(); cnt++
-                minX=minOf(minX,xx); maxX=maxOf(maxX,xx); minY=minOf(minY,yy); maxY=maxOf(maxY,yy)
+                val (xx,yy)=q.removeFirst()
+                cnt++
+                minX=minOf(minX,xx); maxX=maxOf(maxX,xx)
+                minY=minOf(minY,yy); maxY=maxOf(maxY,yy)
+
                 for((dx,dy) in dirs){
                     val nx=xx+dx; val ny=yy+dy
                     if(nx in 0 until gw && ny in 0 until gh && mask[ny][nx] && !seen[ny][nx]){
-                        seen[ny][nx]=true; q += nx to ny
+                        seen[ny][nx]=true
+                        q += nx to ny
                     }
                 }
             }
-            val box = Box(x0+minX*step, y0+minY*step, x0+(maxX+1)*step-1, y0+(maxY+1)*step-1, cnt)
-            if (box.width in 12..55 && box.height in 12..55 && cnt > 25) blobs += box
+
+            val box = Box(
+                x0+minX*step,
+                y0+minY*step,
+                x0+(maxX+1)*step-1,
+                y0+(maxY+1)*step-1,
+                cnt
+            )
+
+            if (box.width in 12..60 && box.height in 12..60 && cnt > 20) blobs += box
         }
 
         val groups = Array(3) { mutableListOf<Box>() }
@@ -106,11 +120,13 @@ class FrameAnalyzer {
         val xs = cluster(boxes.map { it.cx })
         val ys = cluster(boxes.map { it.cy })
         if (xs.isEmpty() || ys.isEmpty()) return null
+
         val cells = boxes.map { b ->
             val c = xs.indices.minBy { abs(xs[it] - b.cx) }
             val r = ys.indices.minBy { abs(ys[it] - b.cy) }
             Cell(r,c)
         }.toSet()
+
         return Piece(cells).normalized()
     }
 
@@ -118,17 +134,22 @@ class FrameAnalyzer {
         if (values.isEmpty()) return emptyList()
         val sorted = values.sorted()
         val out = mutableListOf<MutableList<Float>>()
+
         for (v in sorted) {
             val last = out.lastOrNull()
-            if (last == null || abs(last.average().toFloat() - v) > 12f) out += mutableListOf(v)
-            else last += v
+            if (last == null || abs(last.average().toFloat() - v) > 12f) {
+                out += mutableListOf(v)
+            } else {
+                last += v
+            }
         }
+
         return out.map { it.average().toFloat() }
     }
 
     private fun isGreenish(color: Int): Boolean {
         val hsv = FloatArray(3)
         Color.colorToHSV(color, hsv)
-        return hsv[0] in 75f..165f && hsv[1] > .28f && hsv[2] > .22f
+        return hsv[0] in 70f..170f && hsv[1] > .22f && hsv[2] > .18f
     }
 }
