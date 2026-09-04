@@ -158,7 +158,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v2.2 COMBO • захват запущен"
+            "v2.3 MATH • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -277,7 +277,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v2.2 COMBO • ждём фигуры",
+                    "v2.3 MATH • ждём фигуры",
                     null
                 )
             }
@@ -304,7 +304,7 @@ class CaptureService : Service() {
         overlayView?.post {
             overlayView?.showStatus(
                 overlayRect,
-                "v2.2 COMBO • проверяю...",
+                "v2.3 MATH • проверяю...",
                 null
             )
         }
@@ -346,20 +346,19 @@ class CaptureService : Service() {
                     newPieceCount == 3
 
             if (sameBatchMove || newBatchStarted) {
+                // Every clearing move advances the combo number.
                 if (oldPendingLines > 0) {
+                    comboCount++
                     batchCleared = true
                 }
 
                 if (newBatchStarted) {
-                    // Block Blast combo is treated as one successful clear
-                    // somewhere inside each complete set of three pieces.
-                    if (batchCleared) {
-                        comboCount++
-                    } else {
+                    // The set-of-three rule only keeps or resets the chain.
+                    // We DO NOT increment here anymore.
+                    if (!batchCleared) {
                         comboCount = 0
                     }
 
-                    // We are now at the start of the next 3-piece set.
                     batchCleared = false
                 }
             }
@@ -395,7 +394,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v2.2 COMBO • RETRY • $shapes • occ:$occupied",
+                    "v2.3 MATH • RETRY • $shapes • occ:$occupied",
                     null
                 )
 
@@ -435,7 +434,7 @@ class CaptureService : Service() {
 
                 overlayView?.showStatus(
                     overlayRect,
-                    "v2.2 COMBO • C:" +
+                    "v2.3 MATH • C:" +
                         comboCount +
                         " " +
                         batchText +
