@@ -8,7 +8,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Block Solver Assistant"
+        android:text="Block Solver Assistant v0.3"
         android:textSize="24sp"
         android:textStyle="bold" />
 
@@ -16,7 +16,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="12dp"
-        android:text="Помощник анализирует поле 8×8 и показывает 1→2→3 прямо поверх игры. Нажатия он не делает." />
+        android:text="Тестовая версия показывает служебную плашку SOLVER ON поверх игры, даже если фигуры пока не распознаны." />
 
     <Button
         android:id="@+id/btnOverlay"
