@@ -1,356 +1,331 @@
 package com.example.blocksolver
 
+import java.lang.Long.bitCount
 import kotlin.math.max
 
 class Solver(private val size: Int = 8) {
 
-    private data class SearchState(
-        val board: Array<BooleanArray>,
-        val remainingMask: Int,
-        val steps: List<Placement>,
-        val cleared: Int,
-        val quickScore: Double
+    private data class Key(
+        val board: Long,
+        val remainingMask: Int
     )
 
-    companion object {
-        // Keeps the solver fast on a phone while still looking far enough ahead.
-        private const val BEAM_WIDTH = 700
+    private data class Candidate(
+        val top: Int,
+        val left: Int,
+        val mask: Long
+    )
+
+    private data class Choice(
+        val pieceIndex: Int,
+        val candidate: Candidate
+    )
+
+    private val rowMasks = LongArray(8) { r ->
+        var mask = 0L
+        for (c in 0 until 8) {
+            mask = mask or bit(r, c)
+        }
+        mask
+    }
+
+    private val colMasks = LongArray(8) { c ->
+        var mask = 0L
+        for (r in 0 until 8) {
+            mask = mask or bit(r, c)
+        }
+        mask
     }
 
     fun solve(
         initial: Array<BooleanArray>,
         pieces: List<Piece>
     ): Solution? {
-        if (pieces.size != 3 || pieces.any { it.cells.isEmpty() }) {
-            return null
+        if (pieces.isEmpty() || pieces.size > 3) return null
+        if (pieces.any { it.cells.isEmpty() }) return null
+
+        val normalized = pieces.map { it.normalized() }
+        val placements = normalized.map { buildCandidates(it) }
+        if (placements.any { it.isEmpty() }) return null
+
+        val signatures = normalized.map { shapeSignature(it) }
+        val memo = HashMap<Key, Double>(65536)
+        val choices = HashMap<Key, Choice>(65536)
+
+        val startBoard = toBits(initial)
+        val allMask = (1 shl normalized.size) - 1
+
+        fun search(board: Long, remainingMask: Int): Double {
+            if (remainingMask == 0) {
+                return evaluateBoard(board)
+            }
+
+            val key = Key(board, remainingMask)
+            memo[key]?.let { return it }
+
+            var bestScore = Double.NEGATIVE_INFINITY
+            var bestChoice: Choice? = null
+            val usedShapes = HashSet<Long>(3)
+
+            for (pieceIndex in normalized.indices) {
+                val pieceBit = 1 shl pieceIndex
+                if ((remainingMask and pieceBit) == 0) continue
+
+                val signature = signatures[pieceIndex]
+                if (!usedShapes.add(signature)) continue
+
+                for (candidate in placements[pieceIndex]) {
+                    if ((board and candidate.mask) != 0L) continue
+
+                    val placed = board or candidate.mask
+                    val clearResult = clearLines(placed)
+                    val nextBoard = clearResult.first
+                    val clearedLines = clearResult.second
+
+                    val child = search(
+                        nextBoard,
+                        remainingMask and pieceBit.inv()
+                    )
+
+                    if (child == Double.NEGATIVE_INFINITY) continue
+
+                    val score =
+                        child +
+                        clearedLines * 1150.0 +
+                        if (clearedLines >= 2) 180.0 * clearedLines else 0.0
+
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestChoice = Choice(pieceIndex, candidate)
+                    }
+                }
+            }
+
+            memo[key] = bestScore
+            if (bestChoice != null) {
+                choices[key] = bestChoice
+            }
+            return bestScore
         }
 
-        var frontier = listOf(
-            SearchState(
-                board = initial.deepCopy(),
-                remainingMask = 0b111,
-                steps = emptyList(),
-                cleared = 0,
-                quickScore = quickEvaluate(initial, 0)
+        val bestScore = search(startBoard, allMask)
+        if (bestScore == Double.NEGATIVE_INFINITY) return null
+
+        val steps = mutableListOf<Placement>()
+        var board = startBoard
+        var remainingMask = allMask
+
+        while (remainingMask != 0) {
+            val key = Key(board, remainingMask)
+            val choice = choices[key] ?: break
+            val piece = normalized[choice.pieceIndex]
+            val candidate = choice.candidate
+
+            val cells = piece.cells.map {
+                Cell(
+                    r = candidate.top + it.r,
+                    c = candidate.left + it.c
+                )
+            }.toSet()
+
+            steps += Placement(
+                pieceIndex = choice.pieceIndex,
+                top = candidate.top,
+                left = candidate.left,
+                cells = cells
             )
-        )
 
-        repeat(3) {
-            val next = ArrayList<SearchState>(BEAM_WIDTH * 8)
-
-            for (state in frontier) {
-                for (pieceIndex in 0 until 3) {
-                    if ((state.remainingMask and (1 shl pieceIndex)) == 0) {
-                        continue
-                    }
-
-                    val piece = pieces[pieceIndex].normalized()
-
-                    for (r in 0..(size - piece.height)) {
-                        for (c in 0..(size - piece.width)) {
-                            if (!fits(state.board, piece, r, c)) {
-                                continue
-                            }
-
-                            val board = state.board.deepCopy()
-                            val placedCells = piece.cells
-                                .map { Cell(r + it.r, c + it.c) }
-                                .toSet()
-
-                            for (cell in placedCells) {
-                                board[cell.r][cell.c] = true
-                            }
-
-                            val clearedNow = clearLines(board)
-                            val clearedTotal = state.cleared + clearedNow
-
-                            next += SearchState(
-                                board = board,
-                                remainingMask = state.remainingMask and
-                                    (1 shl pieceIndex).inv(),
-                                steps = state.steps + Placement(
-                                    pieceIndex = pieceIndex,
-                                    top = r,
-                                    left = c,
-                                    cells = placedCells
-                                ),
-                                cleared = clearedTotal,
-                                quickScore = quickEvaluate(
-                                    board,
-                                    clearedTotal
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            if (next.isEmpty()) {
-                return null
-            }
-
-            frontier = if (next.size <= BEAM_WIDTH) {
-                next
-            } else {
-                next
-                    .sortedByDescending { it.quickScore }
-                    .take(BEAM_WIDTH)
-            }
+            board = clearLines(board or candidate.mask).first
+            remainingMask =
+                remainingMask and
+                (1 shl choice.pieceIndex).inv()
         }
 
-        val best = frontier.maxByOrNull {
-            finalEvaluate(it.board, it.cleared)
-        } ?: return null
-
-        return Solution(
-            steps = best.steps,
-            score = finalEvaluate(best.board, best.cleared)
-        )
+        return if (steps.isEmpty()) {
+            null
+        } else {
+            Solution(steps, bestScore)
+        }
     }
 
-    private fun fits(
-        board: Array<BooleanArray>,
-        piece: Piece,
-        top: Int,
-        left: Int
-    ): Boolean {
+    private fun buildCandidates(piece: Piece): List<Candidate> {
+        val out = ArrayList<Candidate>(64)
+
+        for (top in 0..(size - piece.height)) {
+            for (left in 0..(size - piece.width)) {
+                var mask = 0L
+                for (cell in piece.cells) {
+                    mask = mask or bit(
+                        top + cell.r,
+                        left + cell.c
+                    )
+                }
+                out += Candidate(top, left, mask)
+            }
+        }
+        return out
+    }
+
+    private fun shapeSignature(piece: Piece): Long {
+        var mask = 0L
         for (cell in piece.cells) {
-            if (board[top + cell.r][left + cell.c]) {
-                return false
-            }
+            mask = mask or bit(cell.r, cell.c)
         }
-        return true
+        return mask
     }
 
-    private fun clearLines(
-        board: Array<BooleanArray>
-    ): Int {
-        val fullRows = BooleanArray(size)
-        val fullCols = BooleanArray(size)
+    private fun clearLines(board: Long): Pair<Long, Int> {
+        var clearMask = 0L
+        var count = 0
 
-        var rowCount = 0
-        var colCount = 0
-
-        for (r in 0 until size) {
-            var full = true
-            for (c in 0 until size) {
-                if (!board[r][c]) {
-                    full = false
-                    break
-                }
-            }
-            if (full) {
-                fullRows[r] = true
-                rowCount++
+        for (r in 0 until 8) {
+            val mask = rowMasks[r]
+            if ((board and mask) == mask) {
+                clearMask = clearMask or mask
+                count++
             }
         }
 
-        for (c in 0 until size) {
-            var full = true
-            for (r in 0 until size) {
-                if (!board[r][c]) {
-                    full = false
-                    break
-                }
-            }
-            if (full) {
-                fullCols[c] = true
-                colCount++
+        for (c in 0 until 8) {
+            val mask = colMasks[c]
+            if ((board and mask) == mask) {
+                clearMask = clearMask or mask
+                count++
             }
         }
 
-        if (rowCount == 0 && colCount == 0) {
-            return 0
+        return if (count == 0) {
+            board to 0
+        } else {
+            (board and clearMask.inv()) to count
         }
-
-        for (r in 0 until size) {
-            for (c in 0 until size) {
-                if (fullRows[r] || fullCols[c]) {
-                    board[r][c] = false
-                }
-            }
-        }
-
-        return rowCount + colCount
     }
 
-    private fun quickEvaluate(
-        board: Array<BooleanArray>,
-        cleared: Int
-    ): Double {
-        var occupied = 0
-        var isolated = 0
-        var open2x2 = 0
-        var linePotential = 0
-
-        for (r in 0 until size) {
-            var rowFilled = 0
-            for (c in 0 until size) {
-                if (board[r][c]) {
-                    occupied++
-                    rowFilled++
-                }
-            }
-            linePotential += rowFilled * rowFilled
-        }
-
-        for (c in 0 until size) {
-            var colFilled = 0
-            for (r in 0 until size) {
-                if (board[r][c]) {
-                    colFilled++
-                }
-            }
-            linePotential += colFilled * colFilled
-        }
-
-        for (r in 0 until size) {
-            for (c in 0 until size) {
-                if (board[r][c]) continue
-
-                var open = 0
-                if (r > 0 && !board[r - 1][c]) open++
-                if (r < size - 1 && !board[r + 1][c]) open++
-                if (c > 0 && !board[r][c - 1]) open++
-                if (c < size - 1 && !board[r][c + 1]) open++
-
-                if (open <= 1) {
-                    isolated++
-                }
-            }
-        }
-
-        for (r in 0 until size - 1) {
-            for (c in 0 until size - 1) {
-                if (
-                    !board[r][c] &&
-                    !board[r + 1][c] &&
-                    !board[r][c + 1] &&
-                    !board[r + 1][c + 1]
-                ) {
-                    open2x2++
-                }
-            }
-        }
-
-        return cleared * 1200.0 -
-            occupied * 9.0 -
-            isolated * 105.0 +
-            open2x2 * 5.0 +
-            linePotential * 0.8
-    }
-
-    private fun finalEvaluate(
-        board: Array<BooleanArray>,
-        cleared: Int
-    ): Double {
-        val base = quickEvaluate(board, cleared)
+    private fun evaluateBoard(board: Long): Double {
+        val occupied = bitCount(board)
+        val isolated = isolatedEmptyCells(board)
         val components = emptyComponents(board)
-        val largestRect = largestEmptyRectangle(board)
 
-        return base -
-            max(0, components - 1) * 30.0 +
-            largestRect * 8.0
+        val open3x3 = countEmptyWindows(board, 3, 3)
+        val open2x3 = countEmptyWindows(board, 2, 3)
+        val open3x2 = countEmptyWindows(board, 3, 2)
+        val open2x2 = countEmptyWindows(board, 2, 2)
+        val open1x5 = countEmptyWindows(board, 1, 5)
+        val open5x1 = countEmptyWindows(board, 5, 1)
+
+        var linePotential = 0
+        for (r in 0 until 8) {
+            val n = bitCount(board and rowMasks[r])
+            linePotential += n * n
+        }
+        for (c in 0 until 8) {
+            val n = bitCount(board and colMasks[c])
+            linePotential += n * n
+        }
+
+        return
+            -occupied * 8.0 -
+            isolated * 125.0 -
+            max(0, components - 1) * 28.0 +
+            open3x3 * 34.0 +
+            (open2x3 + open3x2) * 12.0 +
+            open2x2 * 5.0 +
+            (open1x5 + open5x1) * 7.0 +
+            linePotential * 0.55
     }
 
-    private fun emptyComponents(
-        board: Array<BooleanArray>
+    private fun countEmptyWindows(
+        board: Long,
+        height: Int,
+        width: Int
     ): Int {
-        val seen = Array(size) { BooleanArray(size) }
-        val q = ArrayDeque<Cell>()
-        var comps = 0
+        var count = 0
 
-        for (r in 0 until size) {
-            for (c in 0 until size) {
-                if (board[r][c] || seen[r][c]) {
-                    continue
+        for (top in 0..(8 - height)) {
+            for (left in 0..(8 - width)) {
+                var mask = 0L
+                for (r in 0 until height) {
+                    for (c in 0 until width) {
+                        mask = mask or bit(top + r, left + c)
+                    }
                 }
-
-                comps++
-                seen[r][c] = true
-                q.addLast(Cell(r, c))
-
-                while (q.isNotEmpty()) {
-                    val cur = q.removeFirst()
-
-                    val r0 = cur.r
-                    val c0 = cur.c
-
-                    if (
-                        r0 > 0 &&
-                        !board[r0 - 1][c0] &&
-                        !seen[r0 - 1][c0]
-                    ) {
-                        seen[r0 - 1][c0] = true
-                        q.addLast(Cell(r0 - 1, c0))
-                    }
-
-                    if (
-                        r0 < size - 1 &&
-                        !board[r0 + 1][c0] &&
-                        !seen[r0 + 1][c0]
-                    ) {
-                        seen[r0 + 1][c0] = true
-                        q.addLast(Cell(r0 + 1, c0))
-                    }
-
-                    if (
-                        c0 > 0 &&
-                        !board[r0][c0 - 1] &&
-                        !seen[r0][c0 - 1]
-                    ) {
-                        seen[r0][c0 - 1] = true
-                        q.addLast(Cell(r0, c0 - 1))
-                    }
-
-                    if (
-                        c0 < size - 1 &&
-                        !board[r0][c0 + 1] &&
-                        !seen[r0][c0 + 1]
-                    ) {
-                        seen[r0][c0 + 1] = true
-                        q.addLast(Cell(r0, c0 + 1))
-                    }
+                if ((board and mask) == 0L) {
+                    count++
                 }
             }
         }
-
-        return comps
+        return count
     }
 
-    private fun largestEmptyRectangle(
-        board: Array<BooleanArray>
-    ): Int {
-        val heights = IntArray(size)
-        var best = 0
+    private fun isolatedEmptyCells(board: Long): Int {
+        var count = 0
 
-        for (r in 0 until size) {
-            for (c in 0 until size) {
-                heights[c] =
-                    if (!board[r][c]) heights[c] + 1 else 0
-            }
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                val here = bit(r, c)
+                if ((board and here) != 0L) continue
 
-            for (left in 0 until size) {
-                var minHeight = Int.MAX_VALUE
+                var openNeighbours = 0
 
-                for (right in left until size) {
-                    minHeight = minOf(
-                        minHeight,
-                        heights[right]
-                    )
+                if (r > 0 && (board and bit(r - 1, c)) == 0L) openNeighbours++
+                if (r < 7 && (board and bit(r + 1, c)) == 0L) openNeighbours++
+                if (c > 0 && (board and bit(r, c - 1)) == 0L) openNeighbours++
+                if (c < 7 && (board and bit(r, c + 1)) == 0L) openNeighbours++
 
-                    best = max(
-                        best,
-                        minHeight * (right - left + 1)
-                    )
+                if (openNeighbours <= 1) {
+                    count++
                 }
             }
         }
-
-        return best
+        return count
     }
 
-    private fun Array<BooleanArray>.deepCopy():
-        Array<BooleanArray> =
-        Array(size) { this[it].clone() }
+    private fun emptyComponents(board: Long): Int {
+        var unseen = board.inv()
+        var components = 0
+
+        while (unseen != 0L) {
+            val seedIndex = java.lang.Long.numberOfTrailingZeros(unseen)
+            var frontier = 1L shl seedIndex
+            components++
+
+            while (frontier != 0L) {
+                unseen = unseen and frontier.inv()
+
+                var next = 0L
+                var f = frontier
+
+                while (f != 0L) {
+                    val idx = java.lang.Long.numberOfTrailingZeros(f)
+                    val r = idx / 8
+                    val c = idx % 8
+
+                    if (r > 0) next = next or bit(r - 1, c)
+                    if (r < 7) next = next or bit(r + 1, c)
+                    if (c > 0) next = next or bit(r, c - 1)
+                    if (c < 7) next = next or bit(r, c + 1)
+
+                    f = f and (f - 1)
+                }
+
+                frontier = next and unseen
+            }
+        }
+        return components
+    }
+
+    private fun toBits(board: Array<BooleanArray>): Long {
+        var bits = 0L
+        for (r in 0 until 8) {
+            for (c in 0 until 8) {
+                if (board[r][c]) {
+                    bits = bits or bit(r, c)
+                }
+            }
+        }
+        return bits
+    }
+
+    private fun bit(r: Int, c: Int): Long =
+        1L shl (r * 8 + c)
 }
