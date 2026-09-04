@@ -109,11 +109,11 @@ class Solver(private val size: Int = 8) {
             val comboContinuity =
                 if (clearedInBatch) {
                     5200.0 +
-                        min(comboCount, 50) * 220.0 +
+                        min(comboCount, 250) * 260.0 +
                         nextBatchSetupPotential(board) * 1.15
                 } else if (comboCount > 0) {
                     -1_000_000.0 -
-                        min(comboCount, 50) * 10_000.0
+                        min(comboCount, 500) * 20_000.0
                 } else {
                     -40_000.0
                 }
@@ -183,7 +183,7 @@ class Solver(private val size: Int = 8) {
                             clearedLines > 0
                         ) {
                             6200.0 +
-                                min(comboCount, 45) * 300.0
+                                min(comboCount, 250) * 420.0
                         } else {
                             0.0
                         }
@@ -496,7 +496,7 @@ class Solver(private val size: Int = 8) {
 
         val multiplier =
             (comboCount + 2)
-                .coerceAtMost(40)
+                .coerceAtMost(250)
                 .toDouble()
 
         val multiLineExtra =
@@ -509,7 +509,7 @@ class Solver(private val size: Int = 8) {
                 else -> 11000.0
             }
 
-        return base * multiplier * 5.0 +
+        return base * multiplier * 6.0 +
             multiLineExtra
     }
 
