@@ -317,7 +317,7 @@ class CaptureService : Service() {
             return
         }
 
-        if (candidateSeen < 2) {
+        if (candidateSeen < 3) {
             return
         }
 
