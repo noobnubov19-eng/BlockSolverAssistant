@@ -662,11 +662,17 @@ class FrameAnalyzer {
         while (queue.isNotEmpty()) {
             val cur = queue.removeFirst()
 
+            // Block Blast also has diagonal two-cell pieces.
+            // Treat corner-touching cells as one legitimate piece, not noise.
             val neighbours = arrayOf(
                 Cell(cur.r - 1, cur.c),
                 Cell(cur.r + 1, cur.c),
                 Cell(cur.r, cur.c - 1),
-                Cell(cur.r, cur.c + 1)
+                Cell(cur.r, cur.c + 1),
+                Cell(cur.r - 1, cur.c - 1),
+                Cell(cur.r - 1, cur.c + 1),
+                Cell(cur.r + 1, cur.c - 1),
+                Cell(cur.r + 1, cur.c + 1)
             )
 
             for (next in neighbours) {
