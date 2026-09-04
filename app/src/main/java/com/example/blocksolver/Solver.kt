@@ -16,7 +16,9 @@ class Solver(private val size: Int = 8) {
 
     private data class Key(
         val board: Long,
-        val remainingMask: Int
+        val remainingMask: Int,
+        val combo: Int,
+        val gap: Int
     )
 
     private data class Candidate(
@@ -27,7 +29,10 @@ class Solver(private val size: Int = 8) {
 
     private data class Choice(
         val pieceIndex: Int,
-        val candidate: Candidate
+        val candidate: Candidate,
+        val lines: Int,
+        val nextCombo: Int,
+        val nextGap: Int
     )
 
     private data class FutureShape(
@@ -61,7 +66,9 @@ class Solver(private val size: Int = 8) {
 
     fun solve(
         initial: Array<BooleanArray>,
-        pieces: List<Piece>
+        pieces: List<Piece>,
+        comboCount: Int = 0,
+        movesSinceClear: Int = 0
     ): Solution? {
         if (pieces.isEmpty() || pieces.size > 3) return null
         if (pieces.any { it.cells.isEmpty() }) return null
@@ -78,15 +85,48 @@ class Solver(private val size: Int = 8) {
         val startBoard = toBits(initial)
         val allMask = (1 shl normalized.size) - 1
 
-        fun terminalScore(board: Long): Double =
-            evalCache.getOrPut(board) { evaluateBoard(board) }
+        fun terminalScore(
+            board: Long,
+            combo: Int,
+            gap: Int
+        ): Double {
+            val base = evalCache.getOrPut(board) {
+                evaluateBoard(board)
+            }
 
-        fun search(board: Long, remainingMask: Int): Double {
-            val key = Key(board, remainingMask)
+            val comboValue =
+                if (combo > 0) {
+                    min(combo, 30) * 42.0 -
+                        gap * 120.0
+                } else {
+                    0.0
+                }
+
+            return base + comboValue
+        }
+
+        fun search(
+            board: Long,
+            remainingMask: Int,
+            combo: Int,
+            gap: Int
+        ): Double {
+            val safeCombo = combo.coerceIn(0, 60)
+            val safeGap = gap.coerceIn(0, 2)
+            val key = Key(
+                board,
+                remainingMask,
+                safeCombo,
+                safeGap
+            )
             memo[key]?.let { return it }
 
             if (remainingMask == 0) {
-                val score = terminalScore(board)
+                val score = terminalScore(
+                    board,
+                    safeCombo,
+                    safeGap
+                )
                 memo[key] = score
                 return score
             }
@@ -109,29 +149,64 @@ class Solver(private val size: Int = 8) {
                     val nextBoard = clear.first
                     val clearedLines = clear.second
 
+                    val transition = nextComboState(
+                        safeCombo,
+                        safeGap,
+                        clearedLines
+                    )
+
+                    val nextCombo = transition.first
+                    val nextGap = transition.second
+                    val lostCombo = transition.third
+
                     val child = search(
                         nextBoard,
-                        remainingMask and pieceBit.inv()
+                        remainingMask and pieceBit.inv(),
+                        nextCombo,
+                        nextGap
                     )
                     if (child == Double.NEGATIVE_INFINITY) continue
 
-                    // We still reward clears, but not enough to sacrifice future survival.
-                    val clearBonus =
-                        when (clearedLines) {
-                            0 -> 0.0
-                            1 -> 760.0
-                            2 -> 2100.0
-                            3 -> 3900.0
-                            4 -> 6200.0
-                            else -> 6200.0 +
-                                (clearedLines - 4) * 2600.0
+                    val clearBonus = estimatedClearValue(
+                        clearedLines,
+                        nextCombo
+                    )
+
+                    val comboLossPenalty =
+                        if (lostCombo) {
+                            2100.0 +
+                                min(safeCombo, 25) * 115.0
+                        } else {
+                            0.0
                         }
 
-                    val score = child + clearBonus
+                    val rescueBonus =
+                        if (
+                            clearedLines > 0 &&
+                            safeCombo > 0 &&
+                            safeGap == 2
+                        ) {
+                            1350.0 +
+                                min(safeCombo, 25) * 70.0
+                        } else {
+                            0.0
+                        }
+
+                    val score =
+                        child +
+                        clearBonus +
+                        rescueBonus -
+                        comboLossPenalty
 
                     if (score > bestScore) {
                         bestScore = score
-                        bestChoice = Choice(pieceIndex, candidate)
+                        bestChoice = Choice(
+                            pieceIndex,
+                            candidate,
+                            clearedLines,
+                            nextCombo,
+                            nextGap
+                        )
                     }
                 }
             }
@@ -141,15 +216,33 @@ class Solver(private val size: Int = 8) {
             return bestScore
         }
 
-        val bestScore = search(startBoard, allMask)
+        val initialCombo = comboCount.coerceAtLeast(0)
+        val initialGap = movesSinceClear.coerceIn(0, 2)
+
+        val bestScore = search(
+            startBoard,
+            allMask,
+            initialCombo,
+            initialGap
+        )
         if (bestScore == Double.NEGATIVE_INFINITY) return null
 
         val steps = mutableListOf<Placement>()
         var board = startBoard
         var remainingMask = allMask
+        var combo = initialCombo
+        var gap = initialGap
+        var firstMoveLines = 0
+        var projectedCombo = combo
+        var projectedGap = gap
 
         while (remainingMask != 0) {
-            val key = Key(board, remainingMask)
+            val key = Key(
+                board,
+                remainingMask,
+                combo.coerceIn(0, 60),
+                gap.coerceIn(0, 2)
+            )
             val choice = choices[key] ?: break
             val piece = normalized[choice.pieceIndex]
             val candidate = choice.candidate
@@ -161,6 +254,12 @@ class Solver(private val size: Int = 8) {
                 )
             }.toSet()
 
+            if (steps.isEmpty()) {
+                firstMoveLines = choice.lines
+                projectedCombo = choice.nextCombo
+                projectedGap = choice.nextGap
+            }
+
             steps += Placement(
                 pieceIndex = choice.pieceIndex,
                 top = candidate.top,
@@ -171,9 +270,71 @@ class Solver(private val size: Int = 8) {
             board = clearLines(board or candidate.mask).first
             remainingMask =
                 remainingMask and (1 shl choice.pieceIndex).inv()
+
+            combo = choice.nextCombo
+            gap = choice.nextGap
         }
 
-        return if (steps.isEmpty()) null else Solution(steps, bestScore)
+        return if (steps.isEmpty()) {
+            null
+        } else {
+            Solution(
+                steps = steps,
+                score = bestScore,
+                firstMoveLines = firstMoveLines,
+                projectedCombo = projectedCombo,
+                projectedGap = projectedGap
+            )
+        }
+    }
+
+    private fun nextComboState(
+        combo: Int,
+        gap: Int,
+        lines: Int
+    ): Triple<Int, Int, Boolean> {
+        if (lines > 0) {
+            return Triple(
+                if (combo > 0) combo + 1 else 1,
+                0,
+                false
+            )
+        }
+
+        if (combo <= 0) {
+            return Triple(0, 0, false)
+        }
+
+        val nextGap = gap + 1
+
+        return if (nextGap >= 3) {
+            Triple(0, 0, true)
+        } else {
+            Triple(combo, nextGap, false)
+        }
+    }
+
+    private fun estimatedClearValue(
+        lines: Int,
+        nextCombo: Int
+    ): Double {
+        if (lines <= 0) return 0.0
+
+        val base = when (lines) {
+            1 -> 10.0
+            2 -> 20.0
+            3 -> 60.0
+            4 -> 120.0
+            5 -> 200.0
+            else -> 300.0 + (lines - 6) * 90.0
+        }
+
+        val multiplier =
+            (nextCombo + 1)
+                .coerceAtMost(35)
+                .toDouble()
+
+        return base * multiplier * 5.2
     }
 
     private fun buildCandidates(piece: Piece): List<Candidate> {
