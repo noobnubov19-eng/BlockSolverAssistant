@@ -63,15 +63,39 @@ class FrameAnalyzer {
         // Read a small patch around every cell center.
         for (r in 0 until 8) {
             for (c in 0 until 8) {
-                val cx = rect.left + (c + .5f) * cw
-                val cy = rect.top + (r + .5f) * ch
+                val left = rect.left + c * cw
+                val top = rect.top + r * ch
+                val radius = max(2, (cw * 0.045f).toInt())
 
-                values[i++] = patchBrightness(
-                    bitmap,
-                    cx.toInt(),
-                    cy.toInt(),
-                    radius = max(2, (cw * 0.055f).toInt())
+                val samples = floatArrayOf(
+                    patchBrightness(
+                        bitmap,
+                        (left + cw * 0.32f).toInt(),
+                        (top + ch * 0.32f).toInt(),
+                        radius
+                    ),
+                    patchBrightness(
+                        bitmap,
+                        (left + cw * 0.68f).toInt(),
+                        (top + ch * 0.32f).toInt(),
+                        radius
+                    ),
+                    patchBrightness(
+                        bitmap,
+                        (left + cw * 0.32f).toInt(),
+                        (top + ch * 0.68f).toInt(),
+                        radius
+                    ),
+                    patchBrightness(
+                        bitmap,
+                        (left + cw * 0.68f).toInt(),
+                        (top + ch * 0.68f).toInt(),
+                        radius
+                    )
                 )
+
+                samples.sort()
+                values[i++] = (samples[1] + samples[2]) * 0.5f
             }
         }
 
@@ -109,9 +133,9 @@ class FrameAnalyzer {
 
         // Three known piece lanes. They overlap slightly on purpose.
         val ranges = listOf(
-            0 until (w * 0.36f).toInt(),
-            (w * 0.30f).toInt() until (w * 0.70f).toInt(),
-            (w * 0.64f).toInt() until w
+            (w * 0.04f).toInt() until (w * 0.32f).toInt(),
+            (w * 0.32f).toInt() until (w * 0.64f).toInt(),
+            (w * 0.64f).toInt() until (w * 0.96f).toInt()
         )
 
         val result = mutableListOf<Piece>()
