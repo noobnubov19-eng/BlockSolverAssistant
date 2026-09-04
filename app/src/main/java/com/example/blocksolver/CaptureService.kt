@@ -149,7 +149,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v0.8 • захват запущен"
+            "v0.9 • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -268,7 +268,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v0.8 • ждём фигуры",
+                    "v0.9 • ждём фигуры",
                     null
                 )
             }
@@ -296,13 +296,13 @@ class CaptureService : Service() {
             if (solution == null) {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v0.8 • хода нет",
+                    "v0.9 • хода нет",
                     null
                 )
             } else {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v0.8 • BEST • фигур: ${analysis.pieces.size}",
+                    "v0.9 • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
                     solution
                 )
             }
