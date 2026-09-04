@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * v2.0 Grandmaster solver.
+ * v2.1 Turbo Grandmaster solver.
  *
  * 1) Searches the complete legal order/placement tree for the CURRENT visible pieces.
  * 2) Clears completed rows/columns after every placement.
@@ -36,6 +36,16 @@ class Solver(private val size: Int = 8) {
     private data class FutureShape(
         val weight: Double,
         val masks: LongArray
+    )
+
+    private data class RootOption(
+        val pieceIndex: Int,
+        val candidate: Candidate,
+        val lines: Int,
+        val nextBatchCleared: Boolean,
+        val nextBoard: Long,
+        val nextRemainingMask: Int,
+        val staticScore: Double
     )
 
     private val rowMasks = LongArray(8) { r ->
@@ -84,7 +94,6 @@ class Solver(private val size: Int = 8) {
         val memo = HashMap<Key, Double>(65536)
         val choices = HashMap<Key, Choice>(65536)
         val evalCache = HashMap<Long, Double>(16384)
-        val rolloutCache = HashMap<Long, Double>(16384)
 
         val startBoard = toBits(initial)
         val allMask = (1 shl normalized.size) - 1
@@ -97,28 +106,21 @@ class Solver(private val size: Int = 8) {
                 evaluateBoard(board)
             }
 
-            val futureLookahead = rolloutCache.getOrPut(board) {
-                futureRobustness(board)
-            }
-
             val comboContinuity =
                 if (clearedInBatch) {
                     5200.0 +
                         min(comboCount, 50) * 220.0 +
                         nextBatchSetupPotential(board) * 1.15
                 } else if (comboCount > 0) {
-                    // Losing a live combo is catastrophic for score.
-                    // Keep this far below any normal board-evaluation swing.
                     -1_000_000.0 -
                         min(comboCount, 50) * 10_000.0
                 } else {
-                    // Even from combo 0, strongly prefer starting the chain.
                     -40_000.0
                 }
 
-            return base +
-                comboContinuity +
-                futureLookahead
+            // Keep the complete current-piece search cheap.
+            // Deep future lookahead is applied only to the best root plans below.
+            return base + comboContinuity
         }
 
         fun search(
@@ -208,19 +210,206 @@ class Solver(private val size: Int = 8) {
             return bestScore
         }
 
-        val bestScore = search(
-            startBoard,
-            allMask,
-            batchCleared
-        )
-        if (bestScore == Double.NEGATIVE_INFINITY) return null
+        // First pass: exact search of ALL legal plans for the visible pieces,
+        // using the fast static survival/combo evaluator.
+        val rootOptions = ArrayList<RootOption>(160)
+        val rootUsedShapes = HashSet<Long>(3)
 
-        val steps = mutableListOf<Placement>()
-        var board = startBoard
-        var remainingMask = allMask
-        var clearedInBatch = batchCleared
-        var firstMoveLines = 0
-        var projectedBatchCleared = clearedInBatch
+        for (pieceIndex in normalized.indices) {
+            val pieceBit = 1 shl pieceIndex
+            if ((allMask and pieceBit) == 0) continue
+
+            if (!rootUsedShapes.add(signatures[pieceIndex])) {
+                continue
+            }
+
+            for (candidate in placements[pieceIndex]) {
+                if ((startBoard and candidate.mask) != 0L) {
+                    continue
+                }
+
+                val clear =
+                    clearLines(
+                        startBoard or candidate.mask
+                    )
+
+                val nextBoard = clear.first
+                val clearedLines = clear.second
+                val nextBatchCleared =
+                    batchCleared || clearedLines > 0
+
+                val nextRemainingMask =
+                    allMask and pieceBit.inv()
+
+                val child = search(
+                    nextBoard,
+                    nextRemainingMask,
+                    nextBatchCleared
+                )
+
+                if (child == Double.NEGATIVE_INFINITY) {
+                    continue
+                }
+
+                val clearBonus =
+                    estimatedClearValue(
+                        clearedLines,
+                        comboCount
+                    )
+
+                val firstClearBonus =
+                    if (
+                        !batchCleared &&
+                        clearedLines > 0
+                    ) {
+                        6200.0 +
+                            min(comboCount, 45) * 300.0
+                    } else {
+                        0.0
+                    }
+
+                rootOptions += RootOption(
+                    pieceIndex = pieceIndex,
+                    candidate = candidate,
+                    lines = clearedLines,
+                    nextBatchCleared =
+                        nextBatchCleared,
+                    nextBoard = nextBoard,
+                    nextRemainingMask =
+                        nextRemainingMask,
+                    staticScore =
+                        child +
+                        clearBonus +
+                        firstClearBonus
+                )
+            }
+        }
+
+        if (rootOptions.isEmpty()) {
+            return null
+        }
+
+        fun terminalBoardFor(
+            option: RootOption
+        ): Long {
+            var board = option.nextBoard
+            var remainingMask =
+                option.nextRemainingMask
+
+            var clearedInBatch =
+                option.nextBatchCleared
+
+            while (remainingMask != 0) {
+                val key = Key(
+                    board,
+                    remainingMask,
+                    clearedInBatch
+                )
+
+                val choice =
+                    choices[key] ?: break
+
+                board =
+                    clearLines(
+                        board or
+                            choice.candidate.mask
+                    ).first
+
+                remainingMask =
+                    remainingMask and
+                    (1 shl choice.pieceIndex)
+                        .inv()
+
+                clearedInBatch =
+                    choice.nextBatchCleared
+            }
+
+            return board
+        }
+
+        // Second pass: expensive unseen-piece lookahead only for the few
+        // strongest complete plans. v2.0 did this on thousands of terminal
+        // boards; v2.1 does it on at most 6, which keeps almost all of the
+        // strategic benefit while cutting latency dramatically.
+        val finalists =
+            rootOptions
+                .sortedByDescending {
+                    it.staticScore
+                }
+                .take(
+                    min(
+                        6,
+                        rootOptions.size
+                    )
+                )
+
+        var chosen = finalists.first()
+        var bestScore =
+            Double.NEGATIVE_INFINITY
+
+        for (option in finalists) {
+            val terminalBoard =
+                terminalBoardFor(option)
+
+            val deepScore =
+                futureRobustness(
+                    terminalBoard
+                )
+
+            val total =
+                option.staticScore +
+                deepScore
+
+            if (total > bestScore) {
+                bestScore = total
+                chosen = option
+            }
+        }
+
+        val steps =
+            mutableListOf<Placement>()
+
+        val firstPiece =
+            normalized[
+                chosen.pieceIndex
+            ]
+
+        val firstCells =
+            firstPiece.cells.map {
+                Cell(
+                    r =
+                        chosen.candidate.top +
+                            it.r,
+                    c =
+                        chosen.candidate.left +
+                            it.c
+                )
+            }.toSet()
+
+        steps += Placement(
+            pieceIndex =
+                chosen.pieceIndex,
+            top =
+                chosen.candidate.top,
+            left =
+                chosen.candidate.left,
+            cells = firstCells
+        )
+
+        val firstMoveLines =
+            chosen.lines
+
+        val projectedBatchCleared =
+            chosen.nextBatchCleared
+
+        var board =
+            chosen.nextBoard
+
+        var remainingMask =
+            chosen.nextRemainingMask
+
+        var clearedInBatch =
+            chosen.nextBatchCleared
 
         while (remainingMask != 0) {
             val key = Key(
@@ -228,51 +417,66 @@ class Solver(private val size: Int = 8) {
                 remainingMask,
                 clearedInBatch
             )
-            val choice = choices[key] ?: break
-            val piece = normalized[choice.pieceIndex]
-            val candidate = choice.candidate
 
-            val cells = piece.cells.map {
-                Cell(
-                    r = candidate.top + it.r,
-                    c = candidate.left + it.c
-                )
-            }.toSet()
+            val choice =
+                choices[key] ?: break
 
-            if (steps.isEmpty()) {
-                firstMoveLines = choice.lines
-                projectedBatchCleared =
-                    choice.nextBatchCleared
-            }
+            val piece =
+                normalized[
+                    choice.pieceIndex
+                ]
+
+            val candidate =
+                choice.candidate
+
+            val cells =
+                piece.cells.map {
+                    Cell(
+                        r =
+                            candidate.top +
+                                it.r,
+                        c =
+                            candidate.left +
+                                it.c
+                    )
+                }.toSet()
 
             steps += Placement(
-                pieceIndex = choice.pieceIndex,
-                top = candidate.top,
-                left = candidate.left,
+                pieceIndex =
+                    choice.pieceIndex,
+                top =
+                    candidate.top,
+                left =
+                    candidate.left,
                 cells = cells
             )
 
-            board = clearLines(board or candidate.mask).first
+            board =
+                clearLines(
+                    board or
+                        candidate.mask
+                ).first
+
             remainingMask =
-                remainingMask and (1 shl choice.pieceIndex).inv()
+                remainingMask and
+                (1 shl choice.pieceIndex)
+                    .inv()
 
             clearedInBatch =
                 choice.nextBatchCleared
         }
 
-        return if (steps.isEmpty()) {
-            null
-        } else {
-            Solution(
-                steps = steps,
-                score = bestScore,
-                firstMoveLines = firstMoveLines,
-                projectedCombo = comboCount,
-                projectedGap = 0,
-                projectedBatchCleared =
-                    projectedBatchCleared
-            )
-        }
+        return Solution(
+            steps = steps,
+            score = bestScore,
+            firstMoveLines =
+                firstMoveLines,
+            projectedCombo =
+                comboCount,
+            projectedGap = 0,
+            projectedBatchCleared =
+                projectedBatchCleared
+        )
     }
 
     private fun estimatedClearValue(
