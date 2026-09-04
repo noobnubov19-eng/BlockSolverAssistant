@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.blocksolver"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.5-score-hunter"
+        versionCode = 16
+        versionName = "1.6-batch-combo"
     }
 
     compileOptions {
