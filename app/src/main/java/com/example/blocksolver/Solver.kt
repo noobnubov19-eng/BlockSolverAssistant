@@ -2,7 +2,16 @@ package com.example.blocksolver
 
 import java.lang.Long.bitCount
 import kotlin.math.max
+import kotlin.math.min
 
+/**
+ * v1.0 Survival solver.
+ *
+ * 1) Searches the complete legal order/placement tree for the CURRENT visible pieces.
+ * 2) Clears completed rows/columns after every placement.
+ * 3) Scores the final board for long-term survival using future-piece mobility:
+ *    how many placements remain for a representative library of difficult/common shapes.
+ */
 class Solver(private val size: Int = 8) {
 
     private data class Key(
@@ -21,19 +30,20 @@ class Solver(private val size: Int = 8) {
         val candidate: Candidate
     )
 
+    private data class FutureShape(
+        val weight: Double,
+        val masks: LongArray
+    )
+
     private val rowMasks = LongArray(8) { r ->
         var mask = 0L
-        for (c in 0 until 8) {
-            mask = mask or bit(r, c)
-        }
+        for (c in 0 until 8) mask = mask or bit(r, c)
         mask
     }
 
     private val colMasks = LongArray(8) { c ->
         var mask = 0L
-        for (r in 0 until 8) {
-            mask = mask or bit(r, c)
-        }
+        for (r in 0 until 8) mask = mask or bit(r, c)
         mask
     }
 
@@ -43,6 +53,11 @@ class Solver(private val size: Int = 8) {
     private val windows2x2 = buildWindowMasks(2, 2)
     private val windows1x5 = buildWindowMasks(1, 5)
     private val windows5x1 = buildWindowMasks(5, 1)
+
+    // Representative catalog of future pieces.
+    // The exact game can contain more variants; these cover the shapes
+    // that most often kill a fragmented 8x8 board.
+    private val futureShapes: List<FutureShape> = buildFutureShapes()
 
     fun solve(
         initial: Array<BooleanArray>,
@@ -58,16 +73,20 @@ class Solver(private val size: Int = 8) {
         val signatures = normalized.map { shapeSignature(it) }
         val memo = HashMap<Key, Double>(65536)
         val choices = HashMap<Key, Choice>(65536)
+        val evalCache = HashMap<Long, Double>(16384)
 
         val startBoard = toBits(initial)
         val allMask = (1 shl normalized.size) - 1
+
+        fun terminalScore(board: Long): Double =
+            evalCache.getOrPut(board) { evaluateBoard(board) }
 
         fun search(board: Long, remainingMask: Int): Double {
             val key = Key(board, remainingMask)
             memo[key]?.let { return it }
 
             if (remainingMask == 0) {
-                val score = evaluateBoard(board)
+                val score = terminalScore(board)
                 memo[key] = score
                 return score
             }
@@ -80,28 +99,28 @@ class Solver(private val size: Int = 8) {
                 val pieceBit = 1 shl pieceIndex
                 if ((remainingMask and pieceBit) == 0) continue
 
-                val signature = signatures[pieceIndex]
-                if (!usedShapes.add(signature)) continue
+                // Avoid searching equivalent orders when two visible pieces are identical.
+                if (!usedShapes.add(signatures[pieceIndex])) continue
 
                 for (candidate in placements[pieceIndex]) {
                     if ((board and candidate.mask) != 0L) continue
 
-                    val placed = board or candidate.mask
-                    val clearResult = clearLines(placed)
-                    val nextBoard = clearResult.first
-                    val clearedLines = clearResult.second
+                    val clear = clearLines(board or candidate.mask)
+                    val nextBoard = clear.first
+                    val clearedLines = clear.second
 
                     val child = search(
                         nextBoard,
                         remainingMask and pieceBit.inv()
                     )
-
                     if (child == Double.NEGATIVE_INFINITY) continue
 
-                    val score =
-                        child +
-                        clearedLines * 1150.0 +
-                        if (clearedLines >= 2) 180.0 * clearedLines else 0.0
+                    // We still reward clears, but not enough to sacrifice future survival.
+                    val clearBonus =
+                        clearedLines * 760.0 +
+                        if (clearedLines >= 2) (clearedLines - 1) * 260.0 else 0.0
+
+                    val score = child + clearBonus
 
                     if (score > bestScore) {
                         bestScore = score
@@ -111,9 +130,7 @@ class Solver(private val size: Int = 8) {
             }
 
             memo[key] = bestScore
-            if (bestChoice != null) {
-                choices[key] = bestChoice
-            }
+            if (bestChoice != null) choices[key] = bestChoice
             return bestScore
         }
 
@@ -146,15 +163,10 @@ class Solver(private val size: Int = 8) {
 
             board = clearLines(board or candidate.mask).first
             remainingMask =
-                remainingMask and
-                (1 shl choice.pieceIndex).inv()
+                remainingMask and (1 shl choice.pieceIndex).inv()
         }
 
-        return if (steps.isEmpty()) {
-            null
-        } else {
-            Solution(steps, bestScore)
-        }
+        return if (steps.isEmpty()) null else Solution(steps, bestScore)
     }
 
     private fun buildCandidates(piece: Piece): List<Candidate> {
@@ -164,10 +176,7 @@ class Solver(private val size: Int = 8) {
             for (left in 0..(size - piece.width)) {
                 var mask = 0L
                 for (cell in piece.cells) {
-                    mask = mask or bit(
-                        top + cell.r,
-                        left + cell.c
-                    )
+                    mask = mask or bit(top + cell.r, left + cell.c)
                 }
                 out += Candidate(top, left, mask)
             }
@@ -177,12 +186,13 @@ class Solver(private val size: Int = 8) {
 
     private fun shapeSignature(piece: Piece): Long {
         var mask = 0L
-        for (cell in piece.cells) {
-            mask = mask or bit(cell.r, cell.c)
-        }
+        for (cell in piece.cells) mask = mask or bit(cell.r, cell.c)
         return mask
     }
 
+    /**
+     * Completed rows and columns disappear simultaneously after each move.
+     */
     private fun clearLines(board: Long): Pair<Long, Int> {
         var clearMask = 0L
         var count = 0
@@ -210,10 +220,24 @@ class Solver(private val size: Int = 8) {
         }
     }
 
+    /**
+     * Long-term survival score.
+     *
+     * Large positive terms:
+     * - future piece mobility;
+     * - 3x3 and long-line capacity;
+     * - one connected empty area.
+     *
+     * Large negative terms:
+     * - any common/difficult future shape with ZERO legal placements;
+     * - isolated single-cell pockets;
+     * - fragmented empty space.
+     */
     private fun evaluateBoard(board: Long): Double {
         val occupied = bitCount(board)
         val isolated = isolatedEmptyCells(board)
         val components = emptyComponents(board)
+        val largestEmptyComponent = largestEmptyComponent(board)
 
         val open3x3 = countEmptyWindows(board, windows3x3)
         val open2x3 = countEmptyWindows(board, windows2x3)
@@ -232,24 +256,113 @@ class Solver(private val size: Int = 8) {
             linePotential += n * n
         }
 
+        var mobilityWeighted = 0.0
+        var zeroWeighted = 0.0
+        var minDangerFits = Int.MAX_VALUE
+
+        for (shape in futureShapes) {
+            var fits = 0
+            for (mask in shape.masks) {
+                if ((board and mask) == 0L) fits++
+            }
+
+            mobilityWeighted += shape.weight * min(fits, 18)
+
+            if (fits == 0) {
+                zeroWeighted += shape.weight
+            }
+
+            if (shape.weight >= 1.8) {
+                minDangerFits = min(minDangerFits, fits)
+            }
+        }
+
+        if (minDangerFits == Int.MAX_VALUE) minDangerFits = 0
+
+        val empties = 64 - occupied
+        val componentCoverage =
+            if (empties > 0) largestEmptyComponent.toDouble() / empties else 0.0
+
         return (
-            -occupied * 8.0 -
-            isolated * 125.0 -
-            max(0, components - 1) * 28.0 +
-            open3x3 * 34.0 +
-            (open2x3 + open3x2) * 12.0 +
+            // Future survivability dominates the decision.
+            mobilityWeighted * 20.0 -
+            zeroWeighted * 780.0 +
+            minDangerFits * 42.0 +
+
+            // Keep large usable regions.
+            open3x3 * 44.0 +
+            (open2x3 + open3x2) * 14.0 +
             open2x2 * 5.0 +
-            (open1x5 + open5x1) * 7.0 +
-            linePotential * 0.55
+            (open1x5 + open5x1) * 11.0 +
+            largestEmptyComponent * 7.0 +
+            componentCoverage * 180.0 +
+
+            // Preserve line-building opportunities without becoming greedy.
+            linePotential * 0.34 -
+
+            // Strong anti-fragmentation penalties.
+            occupied * 5.0 -
+            isolated * 165.0 -
+            max(0, components - 1) * 74.0
         )
     }
 
-    private fun buildWindowMasks(
-        height: Int,
-        width: Int
-    ): LongArray {
-        val out = ArrayList<Long>()
+    private fun buildFutureShapes(): List<FutureShape> {
+        val defs = listOf(
+            // singles / bars
+            0.45 to cells("0,0"),
+            0.65 to cells("0,0;0,1"),
+            0.65 to cells("0,0;1,0"),
+            0.85 to cells("0,0;0,1;0,2"),
+            0.85 to cells("0,0;1,0;2,0"),
+            1.25 to cells("0,0;0,1;0,2;0,3"),
+            1.25 to cells("0,0;1,0;2,0;3,0"),
+            2.05 to cells("0,0;0,1;0,2;0,3;0,4"),
+            2.05 to cells("0,0;1,0;2,0;3,0;4,0"),
 
+            // rectangles / squares
+            1.10 to cells("0,0;0,1;1,0;1,1"),
+            1.55 to cells("0,0;0,1;0,2;1,0;1,1;1,2"),
+            1.55 to cells("0,0;0,1;1,0;1,1;2,0;2,1"),
+            2.35 to cells("0,0;0,1;0,2;1,0;1,1;1,2;2,0;2,1;2,2"),
+
+            // L triominoes
+            0.95 to cells("0,0;1,0;1,1"),
+            0.95 to cells("0,0;0,1;1,0"),
+            0.95 to cells("0,0;0,1;1,1"),
+            0.95 to cells("0,1;1,0;1,1"),
+
+            // L pentomino-like 3+3 arms used by the game
+            1.45 to cells("0,0;1,0;2,0;2,1;2,2"),
+            1.45 to cells("0,0;0,1;0,2;1,0;2,0"),
+            1.45 to cells("0,2;1,2;2,0;2,1;2,2"),
+            1.45 to cells("0,0;0,1;0,2;1,2;2,2"),
+
+            // T / zigzag / plus-ish common awkward shapes
+            1.25 to cells("0,0;0,1;0,2;1,1"),
+            1.25 to cells("0,1;1,0;1,1;2,1"),
+            1.25 to cells("0,1;0,2;1,0;1,1"),
+            1.25 to cells("0,0;1,0;1,1;2,1"),
+            1.40 to cells("0,1;1,0;1,1;1,2;2,1")
+        )
+
+        return defs.map { (weight, shapeCells) ->
+            val p = Piece(shapeCells).normalized()
+            FutureShape(
+                weight = weight,
+                masks = buildCandidates(p).map { it.mask }.toLongArray()
+            )
+        }
+    }
+
+    private fun cells(spec: String): Set<Cell> =
+        spec.split(";").map { token ->
+            val parts = token.split(",")
+            Cell(parts[0].toInt(), parts[1].toInt())
+        }.toSet()
+
+    private fun buildWindowMasks(height: Int, width: Int): LongArray {
+        val out = ArrayList<Long>()
         for (top in 0..(8 - height)) {
             for (left in 0..(8 - width)) {
                 var mask = 0L
@@ -261,20 +374,12 @@ class Solver(private val size: Int = 8) {
                 out += mask
             }
         }
-
         return out.toLongArray()
     }
 
-    private fun countEmptyWindows(
-        board: Long,
-        masks: LongArray
-    ): Int {
+    private fun countEmptyWindows(board: Long, masks: LongArray): Int {
         var count = 0
-        for (mask in masks) {
-            if ((board and mask) == 0L) {
-                count++
-            }
-        }
+        for (mask in masks) if ((board and mask) == 0L) count++
         return count
     }
 
@@ -283,19 +388,15 @@ class Solver(private val size: Int = 8) {
 
         for (r in 0 until 8) {
             for (c in 0 until 8) {
-                val here = bit(r, c)
-                if ((board and here) != 0L) continue
+                if ((board and bit(r, c)) != 0L) continue
 
                 var openNeighbours = 0
-
                 if (r > 0 && (board and bit(r - 1, c)) == 0L) openNeighbours++
                 if (r < 7 && (board and bit(r + 1, c)) == 0L) openNeighbours++
                 if (c > 0 && (board and bit(r, c - 1)) == 0L) openNeighbours++
                 if (c < 7 && (board and bit(r, c + 1)) == 0L) openNeighbours++
 
-                if (openNeighbours <= 1) {
-                    count++
-                }
+                if (openNeighbours <= 1) count++
             }
         }
         return count
@@ -311,6 +412,39 @@ class Solver(private val size: Int = 8) {
             components++
 
             while (frontier != 0L) {
+                unseen = unseen and frontier.inv()
+                var next = 0L
+                var f = frontier
+
+                while (f != 0L) {
+                    val idx = java.lang.Long.numberOfTrailingZeros(f)
+                    val r = idx / 8
+                    val c = idx % 8
+
+                    if (r > 0) next = next or bit(r - 1, c)
+                    if (r < 7) next = next or bit(r + 1, c)
+                    if (c > 0) next = next or bit(r, c - 1)
+                    if (c < 7) next = next or bit(r, c + 1)
+
+                    f = f and (f - 1)
+                }
+                frontier = next and unseen
+            }
+        }
+        return components
+    }
+
+    private fun largestEmptyComponent(board: Long): Int {
+        var unseen = board.inv()
+        var best = 0
+
+        while (unseen != 0L) {
+            val seedIndex = java.lang.Long.numberOfTrailingZeros(unseen)
+            var frontier = 1L shl seedIndex
+            var count = 0
+
+            while (frontier != 0L) {
+                count += bitCount(frontier)
                 unseen = unseen and frontier.inv()
 
                 var next = 0L
@@ -328,20 +462,19 @@ class Solver(private val size: Int = 8) {
 
                     f = f and (f - 1)
                 }
-
                 frontier = next and unseen
             }
+            best = max(best, count)
         }
-        return components
+
+        return best
     }
 
     private fun toBits(board: Array<BooleanArray>): Long {
         var bits = 0L
         for (r in 0 until 8) {
             for (c in 0 until 8) {
-                if (board[r][c]) {
-                    bits = bits or bit(r, c)
-                }
+                if (board[r][c]) bits = bits or bit(r, c)
             }
         }
         return bits
