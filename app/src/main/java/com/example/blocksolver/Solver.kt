@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * v2.1 Turbo Grandmaster solver.
+ * v2.3 Combo Math solver.
  *
  * 1) Searches the complete legal order/placement tree for the CURRENT visible pieces.
  * 2) Clears completed rows/columns after every placement.
@@ -13,11 +13,15 @@ import kotlin.math.min
  *    how many placements remain for a representative library of difficult/common shapes.
  */
 class Solver(private val size: Int = 8) {
+    companion object {
+        private const val SCORE_COEFFICIENT = 108.0
+    }
 
     private data class Key(
         val board: Long,
         val remainingMask: Int,
-        val clearedInBatch: Boolean
+        val clearedInBatch: Boolean,
+        val combo: Int
     )
 
     private data class Candidate(
@@ -30,7 +34,8 @@ class Solver(private val size: Int = 8) {
         val pieceIndex: Int,
         val candidate: Candidate,
         val lines: Int,
-        val nextBatchCleared: Boolean
+        val nextBatchCleared: Boolean,
+        val nextCombo: Int
     )
 
     private data class FutureShape(
@@ -100,7 +105,8 @@ class Solver(private val size: Int = 8) {
 
         fun terminalScore(
             board: Long,
-            clearedInBatch: Boolean
+            clearedInBatch: Boolean,
+            combo: Int
         ): Double {
             val base = evalCache.getOrPut(board) {
                 evaluateBoard(board)
@@ -109,11 +115,11 @@ class Solver(private val size: Int = 8) {
             val comboContinuity =
                 if (clearedInBatch) {
                     5200.0 +
-                        min(comboCount, 250) * 260.0 +
+                        combo * 260.0 +
                         nextBatchSetupPotential(board) * 1.15
                 } else if (comboCount > 0) {
                     -1_000_000.0 -
-                        min(comboCount, 500) * 20_000.0
+                        combo * 20_000.0
                 } else {
                     -40_000.0
                 }
@@ -126,19 +132,22 @@ class Solver(private val size: Int = 8) {
         fun search(
             board: Long,
             remainingMask: Int,
-            clearedInBatch: Boolean
+            clearedInBatch: Boolean,
+            combo: Int
         ): Double {
             val key = Key(
                 board,
                 remainingMask,
-                clearedInBatch
+                clearedInBatch,
+                combo
             )
             memo[key]?.let { return it }
 
             if (remainingMask == 0) {
                 val score = terminalScore(
                     board,
-                    clearedInBatch
+                    clearedInBatch,
+                    combo
                 )
                 memo[key] = score
                 return score
@@ -165,16 +174,20 @@ class Solver(private val size: Int = 8) {
                     val nextBatchCleared =
                         clearedInBatch || clearedLines > 0
 
+                    val nextCombo =
+                        if (clearedLines > 0) combo + 1 else combo
+
                     val child = search(
                         nextBoard,
                         remainingMask and pieceBit.inv(),
-                        nextBatchCleared
+                        nextBatchCleared,
+                        nextCombo
                     )
                     if (child == Double.NEGATIVE_INFINITY) continue
 
                     val clearBonus = estimatedClearValue(
                         clearedLines,
-                        comboCount
+                        combo
                     )
 
                     val firstClearBonus =
@@ -183,7 +196,7 @@ class Solver(private val size: Int = 8) {
                             clearedLines > 0
                         ) {
                             6200.0 +
-                                min(comboCount, 250) * 420.0
+                                combo * 420.0
                         } else {
                             0.0
                         }
@@ -199,7 +212,8 @@ class Solver(private val size: Int = 8) {
                             pieceIndex,
                             candidate,
                             clearedLines,
-                            nextBatchCleared
+                            nextBatchCleared,
+                            nextCombo
                         )
                     }
                 }
@@ -241,10 +255,14 @@ class Solver(private val size: Int = 8) {
                 val nextRemainingMask =
                     allMask and pieceBit.inv()
 
+                val nextCombo =
+                    if (clearedLines > 0) comboCount + 1 else comboCount
+
                 val child = search(
                     nextBoard,
                     nextRemainingMask,
-                    nextBatchCleared
+                    nextBatchCleared,
+                    nextCombo
                 )
 
                 if (child == Double.NEGATIVE_INFINITY) {
@@ -263,7 +281,7 @@ class Solver(private val size: Int = 8) {
                         clearedLines > 0
                     ) {
                         6200.0 +
-                            min(comboCount, 45) * 300.0
+                            comboCount * 420.0
                     } else {
                         0.0
                     }
@@ -299,11 +317,15 @@ class Solver(private val size: Int = 8) {
             var clearedInBatch =
                 option.nextBatchCleared
 
+            var combo =
+                if (option.lines > 0) comboCount + 1 else comboCount
+
             while (remainingMask != 0) {
                 val key = Key(
                     board,
                     remainingMask,
-                    clearedInBatch
+                    clearedInBatch,
+                    combo
                 )
 
                 val choice =
@@ -322,6 +344,9 @@ class Solver(private val size: Int = 8) {
 
                 clearedInBatch =
                     choice.nextBatchCleared
+
+                combo =
+                    choice.nextCombo
             }
 
             return board
@@ -411,11 +436,15 @@ class Solver(private val size: Int = 8) {
         var clearedInBatch =
             chosen.nextBatchCleared
 
+        var combo =
+            if (chosen.lines > 0) comboCount + 1 else comboCount
+
         while (remainingMask != 0) {
             val key = Key(
                 board,
                 remainingMask,
-                clearedInBatch
+                clearedInBatch,
+                combo
             )
 
             val choice =
@@ -464,6 +493,9 @@ class Solver(private val size: Int = 8) {
 
             clearedInBatch =
                 choice.nextBatchCleared
+
+            combo =
+                choice.nextCombo
         }
 
         return Solution(
@@ -481,36 +513,24 @@ class Solver(private val size: Int = 8) {
 
     private fun estimatedClearValue(
         lines: Int,
-        comboCount: Int
+        comboBefore: Int
     ): Double {
         if (lines <= 0) return 0.0
 
-        val base = when (lines) {
-            1 -> 10.0
-            2 -> 20.0
-            3 -> 60.0
-            4 -> 120.0
-            5 -> 200.0
-            else -> 300.0 + (lines - 6) * 90.0
+        val nextCombo = comboBefore + 1
+
+        val lineMultiplier = when (lines) {
+            1 -> 1.0
+            2 -> 2.0
+            3 -> 6.0
+            4 -> 12.0
+            5 -> 20.0
+            else -> 30.0 + (lines - 6) * 8.0
         }
 
-        val multiplier =
-            (comboCount + 2)
-                .coerceAtMost(250)
-                .toDouble()
-
-        val multiLineExtra =
-            when (lines) {
-                1 -> 0.0
-                2 -> 900.0
-                3 -> 2600.0
-                4 -> 5200.0
-                5 -> 8200.0
-                else -> 11000.0
-            }
-
-        return base * multiplier * 6.0 +
-            multiLineExtra
+        return SCORE_COEFFICIENT *
+            nextCombo.toDouble() *
+            lineMultiplier
     }
 
     private fun nextBatchSetupPotential(
