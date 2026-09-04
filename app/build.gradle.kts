@@ -12,7 +12,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 8
-        versionName = "0.8-shapes"
+        versionName = "0.9-contrast"
     }
 
     compileOptions {
