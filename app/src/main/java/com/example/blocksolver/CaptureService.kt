@@ -186,7 +186,7 @@ class CaptureService : Service() {
                 val now = System.currentTimeMillis()
 
                 if (
-                    now - lastAnalyzeMs < 140 ||
+                    now - lastAnalyzeMs < 90 ||
                     !busy.compareAndSet(false, true)
                 ) {
                     r.acquireLatestImage()?.close()
@@ -264,13 +264,15 @@ class CaptureService : Service() {
             analysis.boardRect
         )
 
-        if (analysis.pieces.size != 3) {
+        if (analysis.pieces.isEmpty()) {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "SOLVER ON • фигур: ${analysis.pieces.size}/3"
+                    "SOLVER ON • ждём фигуры",
+                    null
                 )
             }
+            lastHash = ""
             return
         }
 
@@ -300,7 +302,7 @@ class CaptureService : Service() {
             } else {
                 overlayView?.showStatus(
                     overlayRect,
-                    "SOLVER ON • 3/3 • готово",
+                    "SOLVER ON • BEST • фигур: ${analysis.pieces.size}",
                     solution
                 )
             }
