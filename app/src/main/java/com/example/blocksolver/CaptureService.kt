@@ -151,7 +151,7 @@ class CaptureService : Service() {
         addOverlay(width, height)
         overlayView?.showStatus(
             null,
-            "v1.2 ADAPTIVE • захват запущен"
+            "v1.3 ROBUST • захват запущен"
         )
 
         val mgr = getSystemService(
@@ -270,7 +270,7 @@ class CaptureService : Service() {
             overlayView?.post {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.2 ADAPTIVE • ждём фигуры",
+                    "v1.3 ROBUST • ждём фигуры",
                     null
                 )
             }
@@ -312,15 +312,27 @@ class CaptureService : Service() {
 
         overlayView?.post {
             if (solution == null) {
+                val occupied = analysis.board.sumOf {
+                    row -> row.count { it }
+                }
+
+                val shapes = analysis.pieces.joinToString("-") {
+                    p -> "${p.cells.size}@${p.height}x${p.width}"
+                }
+
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.2 ADAPTIVE • хода нет",
+                    "v1.3 ROBUST • RETRY • $shapes • occ:$occupied",
                     null
                 )
+
+                // Never permanently cache a no-solution frame.
+                // A theme transition/animation can briefly produce a bad read.
+                lastHash = ""
             } else {
                 overlayView?.showStatus(
                     overlayRect,
-                    "v1.2 ADAPTIVE • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
+                    "v1.3 ROBUST • BEST • ${analysis.pieces.joinToString("-") { it.cells.size.toString() }}",
                     solution
                 )
             }
