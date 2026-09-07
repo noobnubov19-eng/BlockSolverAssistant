@@ -46,6 +46,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.osmdroid.config.Configuration;
+import org.osmdroid.config.IConfigurationProvider;
 import org.osmdroid.tileprovider.cachemanager.CacheManager;
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase;
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
@@ -54,7 +55,7 @@ import org.osmdroid.util.GeoPoint;
 import org.osmdroid.util.MapTileIndex;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.MapEventsOverlay;
-import org.osmdroid.views.overlay.MapEventsReceiver;
+import org.osmdroid.events.MapEventsReceiver;
 import org.osmdroid.views.overlay.Marker;
 import org.osmdroid.views.overlay.Polyline;
 
@@ -166,7 +167,7 @@ public class MainActivity extends AppCompatActivity implements LocationListener 
     }
 
     private void configureOsmdroid() {
-        Configuration cfg = Configuration.getInstance();
+        IConfigurationProvider cfg = Configuration.getInstance();
         cfg.setUserAgentValue(getPackageName() + "/1.0");
         File base = new File(getExternalFilesDir(null), "mapcache");
         File tiles = new File(base, "tiles");
