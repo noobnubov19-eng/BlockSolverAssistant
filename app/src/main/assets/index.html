@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>СтройКарта</title>
+<style>
+:root{--bg:#111512;--panel:rgba(18,23,20,.96);--p2:#252c27;--text:#fff;--muted:#aeb8b1;--green:#5fd06c;--red:#e55b5b;--blue:#57a7ff;--line:#ffffff18}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}button,input,select,textarea{font:inherit}button{color:inherit}
+#map{position:fixed;inset:0;width:100%;height:100%;background:#20251f;touch-action:none}
+.top{position:fixed;z-index:20;left:8px;right:8px;top:max(8px,env(safe-area-inset-top));display:flex;gap:7px;pointer-events:none}.chip{pointer-events:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:9px 10px;box-shadow:0 5px 20px #0008}.brand{font-weight:800}.gps{margin-left:auto;text-align:right;min-width:145px;color:var(--muted);font-size:11px;line-height:1.35}.gps.good{color:#baffc4}.gps.warn{color:#ffd18d}
+.zoom{position:fixed;z-index:18;right:8px;top:91px;display:grid;gap:6px}.zoom button{border:1px solid var(--line);background:var(--panel);width:42px;height:42px;border-radius:12px;font-size:23px}
+.attrib{position:fixed;z-index:12;right:6px;bottom:81px;background:#0009;border-radius:6px;padding:3px 6px;font-size:9px;color:#ddd}
+.toolbar{position:fixed;z-index:30;left:7px;right:7px;bottom:max(7px,env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,1fr);gap:5px;padding:7px;background:var(--panel);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 28px #0009}.tool{min-height:56px;border:0;border-radius:12px;background:var(--p2);font-size:10.5px;padding:6px 3px}.tool b{display:block;font-size:21px;line-height:23px}.tool.primary{background:#fff;color:#111;font-weight:800}.tool.active{background:#35613d}.tool.rec{background:#683536}
+.sheet{display:none;position:fixed;z-index:50;left:7px;right:7px;bottom:76px;max-height:78vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:14px;box-shadow:0 10px 40px #000b}.sheet.open{display:block}.sheet h2{font-size:18px;margin:0 0 12px}.close{float:right;border:0;background:#303732;border-radius:10px;padding:7px 10px}.field{margin:9px 0}.field label{display:block;color:var(--muted);font-size:11px;margin:0 0 5px}.field input,.field select,.field textarea{width:100%;background:#252c27;border:1px solid var(--line);border-radius:11px;color:#fff;padding:11px}.field textarea{min-height:72px;resize:vertical}.row{display:flex;gap:8px}.row>*{flex:1}.action{width:100%;border:0;border-radius:12px;padding:12px;margin-top:8px;background:#fff;color:#111;font-weight:800}.action.green{background:#55c564;color:#071009}.action.secondary{background:#2d342f;color:#fff}.action.danger{background:#5c2b2b;color:#fff}.hint{background:#252c27;border-radius:11px;padding:9px 10px;color:#c9d2cc;font-size:11px;line-height:1.45;margin:8px 0}.warn{background:#4b3a21;color:#ffe0a0}.good{background:#24462b;color:#caffd1}
+.selected{display:none;position:fixed;z-index:35;left:8px;right:8px;bottom:80px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:10px;box-shadow:0 7px 25px #0009;align-items:center;gap:9px}.selected.open{display:flex}.arrow{width:42px;height:42px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#303832;font-size:25px;flex:0 0 auto;transition:transform .15s linear}.selbody{min-width:0;flex:1}.seltitle{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.selmeta{font-size:11px;color:var(--muted);margin-top:3px}.mini{border:0;background:#303732;border-radius:9px;padding:8px}
+.listitem{display:flex;gap:9px;align-items:center;padding:10px 2px;border-bottom:1px solid #ffffff12}.listitem:last-child{border:0}.objicon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:#303732;font-size:18px}.objmeta{flex:1;min-width:0}.objmeta strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pill{display:inline-block;margin-top:3px;border-radius:99px;background:#303732;padding:3px 6px;font-size:10px;color:#d7dfda}.small{font-size:11px;color:var(--muted);line-height:1.4}.filters{display:flex;gap:6px;overflow:auto}.filter{white-space:nowrap;border:1px solid var(--line);background:#29302b;border-radius:99px;padding:7px 10px;font-size:11px}.filter.active{background:#fff;color:#111}
+.statgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.stat{background:#252c27;border-radius:13px;padding:11px}.stat b{display:block;font-size:23px}.progress{height:12px;border-radius:99px;background:#303732;overflow:hidden;margin:10px 0}.progress>div{height:100%;background:var(--green)}.stage{display:grid;grid-template-columns:1fr auto;padding:7px 0;border-bottom:1px solid #ffffff12;font-size:12px}
+.menu{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{border:0;background:#282f2a;border-radius:14px;padding:14px;text-align:left}.card b{display:block;font-size:20px}.card span{display:block;font-size:11px;color:var(--muted);margin-top:4px}
+.bar{height:12px;border-radius:99px;background:#303732;overflow:hidden}.bar>div{height:100%;background:var(--blue);width:0}.offlineProgress{display:none;margin-top:10px}.offlineProgress.open{display:block}
+.toast{display:none;position:fixed;z-index:100;top:72px;left:50%;transform:translateX(-50%);max-width:85%;background:#101510ee;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:12px}.toast.show{display:block}.mode{display:none;position:fixed;z-index:26;top:74px;left:50%;transform:translateX(-50%);max-width:85%;background:#2b4c31ee;border:1px solid var(--line);border-radius:11px;padding:8px 10px;font-size:11px;text-align:center}.mode.open{display:block}
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+<div class="top"><div class="chip brand">СтройКарта</div><div id="gps" class="chip gps">GPS: ожидание…</div></div>
+<div class="zoom"><button onclick="zoomBy(1)">+</button><button onclick="zoomBy(-1)">−</button></div>
+<div class="attrib">Esri World Imagery</div>
+<div id="toast" class="toast"></div><div id="mode" class="mode"></div>
+
+<div id="selected" class="selected">
+  <div id="arrow" class="arrow">↑</div>
+  <div class="selbody"><div id="selTitle" class="seltitle"></div><div id="selMeta" class="selmeta"></div></div>
+  <button class="mini" onclick="goSelected()">◎</button><button class="mini" onclick="editSelected()">✎</button><button class="mini" onclick="closeSelected()">×</button>
+</div>
+
+<div class="toolbar">
+  <button class="tool" onclick="centerMe()"><b>◎</b>Я здесь</button>
+  <button class="tool primary" onclick="openAdd()"><b>＋</b>Объект здесь</button>
+  <button id="pathBtn" class="tool" onclick="togglePath()"><b>〰</b>Тропа</button>
+  <button class="tool" onclick="openList()"><b>⌂</b>Объекты</button>
+  <button class="tool" onclick="openMenu()"><b>≡</b>Ещё</button>
+</div>
+
+<div id="addSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2 id="formTitle">Новый объект</h2>
+  <input id="editId" type="hidden">
+  <div class="row">
+    <div class="field"><label>Тип</label><select id="type"><option value="home">Дом</option><option value="storage">Склад</option><option value="septic">Септик</option><option value="well">Вода / скважина</option><option value="power">Электрика</option><option value="other">Другое</option></select></div>
+    <div class="field"><label>Номер / название</label><input id="name" placeholder="Напр. 37"></div>
+  </div>
+  <div class="field"><label>Этап</label><select id="status"><option value="planned">Запланирован</option><option value="marked">Размечен</option><option value="foundation">Фундамент</option><option value="walls">Стены</option><option value="roof">Крыша</option><option value="utilities">Коммуникации</option><option value="finishing">Отделка</option><option value="done">Готов</option></select></div>
+  <div class="field"><label>Заметка</label><textarea id="notes" placeholder="Размеры, бригада, материалы, что осталось…"></textarea></div>
+  <div id="coord" class="hint"></div>
+  <button class="action green" onclick="saveObject()">Сохранить</button>
+  <button id="deleteBtn" class="action danger" style="display:none" onclick="deleteObject()">Удалить объект</button>
+</div>
+
+<div id="listSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2>Объекты</h2>
+  <div class="field"><input id="search" oninput="renderList()" placeholder="Поиск: дом 37, склад…"></div>
+  <div class="filters"><button class="filter active" onclick="setFilter('all',this)">Все</button><button class="filter" onclick="setFilter('home',this)">Дома</button><button class="filter" onclick="setFilter('done',this)">Готово</button><button class="filter" onclick="setFilter('work',this)">В работе</button></div>
+  <div id="objectList"></div>
+</div>
+
+<div id="menuSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2>Ещё</h2>
+  <div class="menu">
+    <button class="card" onclick="openProgress()"><b>◔</b><span>Прогресс 50+ домов</span></button>
+    <button class="card" onclick="openOffline()"><b>⇩</b><span>Скачать спутник офлайн</span></button>
+    <button id="trackCard" class="card" onclick="toggleTrack()"><b>●</b><span>Записать тропу по GPS</span></button>
+    <button class="card" onclick="openBackup()"><b>⎘</b><span>Резервная копия</span></button>
+  </div>
+  <div class="hint">Все точки и тропы сохраняются в памяти телефона. GPS работает без мобильного интернета. Для леса заранее скачай спутниковый район.</div>
+</div>
+
+<div id="progressSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2>Прогресс стройки</h2><div id="progressContent"></div></div>
+
+<div id="offlineSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2>Офлайн спутник</h2>
+  <div class="hint good">Скачай район сегодня при хорошем интернете. Завтра в горах приложение будет брать сохранённые тайлы из памяти телефона.</div>
+  <div class="row">
+    <div class="field"><label>Радиус от точки</label><select id="radius" onchange="offlineEstimate()"><option value="500">500 м</option><option value="1000" selected>1 км</option><option value="1500">1.5 км</option><option value="2000">2 км</option></select></div>
+    <div class="field"><label>Качество</label><select id="quality" onchange="offlineEstimate()"><option value="15,18">Среднее</option><option value="15,19" selected>Высокое</option><option value="16,20">Максимум</option></select></div>
+  </div>
+  <div id="estimate" class="hint"></div>
+  <button class="action green" onclick="downloadAroundMe()">⇩ Скачать вокруг меня</button>
+  <button class="action secondary" onclick="downloadAtCenter()">⇩ Скачать вокруг центра карты</button>
+  <div id="offlineProgress" class="offlineProgress"><div class="bar"><div id="offlineBar"></div></div><div id="offlineText" class="small" style="margin-top:6px"></div><button class="action danger" onclick="cancelOffline()">Остановить</button></div>
+  <div id="cacheStats" class="hint"></div>
+  <button class="action secondary" onclick="refreshStats()">Обновить размер</button>
+  <button class="action danger" onclick="clearCache()">Очистить офлайн-карту</button>
+  <div class="small">Спутниковая подложка: Esri World Imagery. Использование и кэширование карт регулируется условиями поставщика.</div>
+</div>
+
+<div id="backupSheet" class="sheet"><button class="close" onclick="closeSheets()">×</button><h2>Резервная копия</h2>
+  <div class="hint">Проект автоматически сохраняется после каждого изменения. Отдельную JSON-копию можно сохранить в папку «Загрузки/СтройКарта».</div>
+  <button class="action secondary" onclick="exportBackup()">Сохранить копию в файл</button>
+  <button class="action secondary" onclick="chooseImport()">Восстановить из JSON-файла</button>
+</div>
+
+<script>
+const C=document.getElementById('map'),X=C.getContext('2d',{alpha:false}),T=256,MAXLAT=85.05112878;
+const STATUS={planned:'Запланирован',marked:'Размечен',foundation:'Фундамент',walls:'Стены',roof:'Крыша',utilities:'Коммуникации',finishing:'Отделка',done:'Готов'};
+const WEIGHT={planned:0,marked:8,foundation:20,walls:42,roof:60,utilities:74,finishing:88,done:100};
+const TYPE={home:'Дом',storage:'Склад',septic:'Септик',well:'Скважина',power:'Электрика',other:'Другое'};
+const ICON={home:'⌂',storage:'▣',septic:'S',well:'W',power:'⚡',other:'●'};
+const COLOR={home:'#4d94ff',storage:'#ffad42',septic:'#a978df',well:'#41c7d9',power:'#f5d442',other:'#aab2ad'};
+let S={objects:[],paths:[],nextId:1,track:false,trackPoints:[]},M={lat:0,lon:0,z:2},me=null,acc=-1,alt=0,speed=0,heading=null,centered=false,selected=null,editing=null,pathMode=false,draft=[],filter='all';
+let imgs=new Map(),pointers=new Map(),gesture=null,toastTimer=null;
+function A(n,...a){try{return window.Android&&typeof Android[n]==='function'?Android[n](...a):null}catch(e){return null}}
+function save(){A('saveProject',JSON.stringify(S))}
+function load(){try{const r=A('loadProject');if(r){const s=JSON.parse(r);if(s&&Array.isArray(s.objects)){S=Object.assign(S,s);S.paths=Array.isArray(S.paths)?S.paths:[];S.trackPoints=[];S.track=false;S.objects.forEach(o=>{if(!STATUS[o.status])o.status='planned'})}}}catch(e){}draw()}
+function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.classList.remove('show'),1900)}
+function resize(){const d=Math.min(devicePixelRatio||1,2.2),r=C.getBoundingClientRect();C.width=Math.floor(r.width*d);C.height=Math.floor(r.height*d);X.setTransform(d,0,0,d,0,0);draw()}addEventListener('resize',resize);
+function clamp(v){return Math.max(-MAXLAT,Math.min(MAXLAT,v))}
+function world(lat,lon,z){lat=clamp(lat);const n=2**z*T,s=Math.sin(lat*Math.PI/180);return{x:(lon+180)/360*n,y:(.5-Math.log((1+s)/(1-s))/(4*Math.PI))*n}}
+function inv(x,y,z){const n=2**z*T;let lon=x/n*360-180;while(lon>180)lon-=360;while(lon<-180)lon+=360;return{lat:clamp(90-360*Math.atan(Math.exp(-(.5-y/n)*2*Math.PI))/Math.PI),lon}}
+function screen(lat,lon){const c=world(M.lat,M.lon,M.z),p=world(lat,lon,M.z),w=2**M.z*T;let dx=p.x-c.x;if(dx>w/2)dx-=w;if(dx<-w/2)dx+=w;return{x:C.clientWidth/2+dx,y:C.clientHeight/2+p.y-c.y}}
+function coord(x,y){const c=world(M.lat,M.lon,M.z);return inv(c.x+x-C.clientWidth/2,c.y+y-C.clientHeight/2,M.z)}
+function mpp(lat,z){return 156543.03392*Math.cos(lat*Math.PI/180)/2**z}
+function tile(z,x,y){const n=1<<z,wx=((x%n)+n)%n,k=z+'/'+wx+'/'+y;let o=imgs.get(k);if(!o){const im=new Image();o={im,ok:false};imgs.set(k,o);im.onload=()=>{o.ok=true;draw()};im.src='https://stroykarta.local/tiles/esri/'+z+'/'+wx+'/'+y+'.jpg'}return o}
+function draw(){requestAnimationFrame(()=>{const w=C.clientWidth,h=C.clientHeight;if(!w||!h)return;X.fillStyle='#20251f';X.fillRect(0,0,w,h);drawTiles(w,h);drawPaths();drawObjects();drawMe()})}
+function drawTiles(w,h){const z=M.z,n=1<<z,c=world(M.lat,M.lon,z),l=c.x-w/2,t=c.y-h/2,x1=Math.floor(l/T)-1,x2=Math.floor((l+w)/T)+1,y1=Math.max(0,Math.floor(t/T)-1),y2=Math.min(n-1,Math.floor((t+h)/T)+1);for(let y=y1;y<=y2;y++)for(let x=x1;x<=x2;x++){const o=tile(z,x,y),dx=x*T-l,dy=y*T-t;if(o.ok)X.drawImage(o.im,dx,dy,T,T);else{X.fillStyle='#252c26';X.fillRect(dx,dy,T,T);X.strokeStyle='#303a32';X.strokeRect(dx,dy,T,T)}}}
+function drawPaths(){X.lineCap='round';X.lineJoin='round';for(const p of S.paths){if(!p.points||p.points.length<2)continue;X.beginPath();p.points.forEach((q,i)=>{const s=screen(q[0],q[1]);i?X.lineTo(s.x,s.y):X.moveTo(s.x,s.y)});X.strokeStyle=p.kind==='gps'?'#58dfff':'#fff';X.lineWidth=4;X.stroke()}if(pathMode&&draft.length){X.beginPath();draft.forEach((q,i)=>{const s=screen(q[0],q[1]);i?X.lineTo(s.x,s.y):X.moveTo(s.x,s.y)});X.setLineDash([8,6]);X.strokeStyle='#65ff8b';X.lineWidth=4;X.stroke();X.setLineDash([])}if(S.track&&S.trackPoints.length>1){X.beginPath();S.trackPoints.forEach((q,i)=>{const s=screen(q[0],q[1]);i?X.lineTo(s.x,s.y):X.moveTo(s.x,s.y)});X.strokeStyle='#ff6767';X.lineWidth=4;X.stroke()}}
+function drawObjects(){X.textAlign='center';X.textBaseline='middle';for(const o of S.objects){const p=screen(o.lat,o.lon);if(p.x<-50||p.y<-50||p.x>C.clientWidth+50||p.y>C.clientHeight+50)continue;X.beginPath();X.arc(p.x,p.y,o.status==='done'?17:15,0,Math.PI*2);X.fillStyle=o.status==='done'?'#2e9f48':COLOR[o.type]||'#aaa';X.fill();X.lineWidth=selected===o.id?4:2;X.strokeStyle=selected===o.id?'#fff600':'#fff';X.stroke();X.fillStyle='#fff';X.font='bold 13px system-ui';X.fillText(ICON[o.type]||'●',p.x,p.y);const lab=o.name||String(o.id);X.font='bold 11px system-ui';const tw=X.measureText(lab).width+10;X.fillStyle='#111d';X.fillRect(p.x-tw/2,p.y+18,tw,18);X.fillStyle='#fff';X.fillText(lab,p.x,p.y+27)}}
+function drawMe(){if(!me)return;const p=screen(me.lat,me.lon),r=acc>0?Math.min(180,acc/mpp(me.lat,M.z)):0;if(r){X.beginPath();X.arc(p.x,p.y,r,0,Math.PI*2);X.fillStyle='#55a7ff22';X.fill();X.strokeStyle='#55a7ff88';X.stroke()}X.beginPath();X.arc(p.x,p.y,8,0,Math.PI*2);X.fillStyle='#2d9cff';X.fill();X.strokeStyle='#fff';X.lineWidth=3;X.stroke();if(heading!=null){const a=(heading-90)*Math.PI/180;X.beginPath();X.moveTo(p.x+Math.cos(a)*20,p.y+Math.sin(a)*20);X.lineTo(p.x+Math.cos(a+2.55)*7,p.y+Math.sin(a+2.55)*7);X.lineTo(p.x+Math.cos(a-2.55)*7,p.y+Math.sin(a-2.55)*7);X.closePath();X.fillStyle='#fff';X.fill()}}
+window.onNativeLocation=(lat,lon,a,h,provider,age,spd)=>{me={lat:+lat,lon:+lon};acc=+a;alt=+h;speed=+spd;if(!centered&&acc>0&&acc<100){M.lat=me.lat;M.lon=me.lon;M.z=18;centered=true}if(S.track){const last=S.trackPoints[S.trackPoints.length-1];if(!last||distance(last[0],last[1],me.lat,me.lon)>2.5){S.trackPoints.push([me.lat,me.lon,Date.now(),acc]);if(S.trackPoints.length%5===0)save()}}updateGps();updateSelected();draw()};
+window.onNativeHeading=h=>{heading=+h;updateSelected();draw()};
+function updateGps(){const e=document.getElementById('gps');if(!me){e.textContent='GPS: ожидание…';return}e.className='chip gps '+(acc<=8?'good':acc>15?'warn':'');e.innerHTML='GPS ±'+Math.round(acc)+' м<br>'+Math.round(alt)+' м'+(speed>.4?' · '+(speed*3.6).toFixed(1)+' км/ч':'')}
+function centerMe(){if(!me){A('requestLocationPermission');toast('Ждём точный GPS…');return}M.lat=me.lat;M.lon=me.lon;M.z=Math.max(18,M.z);draw()}
+function zoomBy(d){M.z=Math.max(2,Math.min(20,M.z+d));draw()}
+function nextHome(){let n=0;S.objects.filter(o=>o.type==='home').forEach(o=>{const x=parseInt(String(o.name).match(/\d+/)?.[0]||0);n=Math.max(n,x)});return String(n+1)}
+function openAdd(){if(!me){A('requestLocationPermission');toast('Сначала дождись GPS');return}editing=null;document.getElementById('formTitle').textContent='Объект в моей GPS-точке';document.getElementById('type').value='home';document.getElementById('name').value=nextHome();document.getElementById('status').value='planned';document.getElementById('notes').value='';document.getElementById('coord').innerHTML='<b>'+me.lat.toFixed(7)+', '+me.lon.toFixed(7)+'</b><br>Точность: <b>±'+Math.round(acc)+' м</b>';document.getElementById('deleteBtn').style.display='none';openSheet('addSheet')}
+function saveObject(){const type=document.getElementById('type').value,name=document.getElementById('name').value.trim(),status=document.getElementById('status').value,notes=document.getElementById('notes').value.trim();if(editing!=null){const o=S.objects.find(x=>x.id===editing);if(!o)return;o.type=type;o.name=name;o.status=status;o.notes=notes;save();closeSheets();updateSelected();draw();toast('Сохранено');return}if(!me)return;if(acc>15&&!confirm('Точность сейчас ±'+Math.round(acc)+' м. Поставить точку всё равно?'))return;const o={id:S.nextId++,type,name:name||String(S.nextId-1),status,notes,lat:me.lat,lon:me.lon,accuracy:acc,createdAt:Date.now()};S.objects.push(o);save();closeSheets();selectObject(o.id);draw();toast('Точка поставлена по GPS')}
+function selectObject(id){selected=id;updateSelected();draw()}
+function closeSelected(){selected=null;document.getElementById('selected').classList.remove('open');draw()}
+function updateSelected(){const box=document.getElementById('selected');if(selected==null){box.classList.remove('open');return}const o=S.objects.find(x=>x.id===selected);if(!o){closeSelected();return}box.classList.add('open');document.getElementById('selTitle').textContent=(TYPE[o.type]||'Объект')+' '+(o.name||o.id)+' · '+(STATUS[o.status]||o.status);let m=o.lat.toFixed(6)+', '+o.lon.toFixed(6);if(me){const d=distance(me.lat,me.lon,o.lat,o.lon),b=bearing(me.lat,me.lon,o.lat,o.lon);m=formatDistance(d)+' · азимут '+Math.round(b)+'° · точка '+(o.accuracy?'±'+Math.round(o.accuracy)+' м':'');document.getElementById('arrow').style.transform='rotate('+((heading==null?b:(b-heading+360)%360))+'deg)'}document.getElementById('selMeta').textContent=m}
+function goSelected(){const o=S.objects.find(x=>x.id===selected);if(!o)return;M.lat=o.lat;M.lon=o.lon;M.z=19;draw()}
+function editSelected(){const o=S.objects.find(x=>x.id===selected);if(!o)return;editing=o.id;document.getElementById('formTitle').textContent=(TYPE[o.type]||'Объект')+' '+(o.name||o.id);document.getElementById('type').value=o.type;document.getElementById('name').value=o.name||'';document.getElementById('status').value=o.status;document.getElementById('notes').value=o.notes||'';document.getElementById('coord').innerHTML=o.lat.toFixed(7)+', '+o.lon.toFixed(7)+'<br>Точность при установке: '+(o.accuracy?'±'+Math.round(o.accuracy)+' м':'—');document.getElementById('deleteBtn').style.display='block';openSheet('addSheet')}
+function deleteObject(){if(editing==null||!confirm('Удалить объект?'))return;S.objects=S.objects.filter(x=>x.id!==editing);save();editing=null;closeSheets();closeSelected();draw()}
+function openList(){renderList();openSheet('listSheet')}
+function setFilter(f,b){filter=f;document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');renderList()}
+function renderList(){const q=(document.getElementById('search').value||'').toLowerCase();let a=S.objects.slice();if(filter==='home')a=a.filter(o=>o.type==='home');if(filter==='done')a=a.filter(o=>o.status==='done');if(filter==='work')a=a.filter(o=>!['planned','done'].includes(o.status));if(q)a=a.filter(o=>((TYPE[o.type]||'')+' '+(o.name||'')+' '+(o.notes||'')+' '+(STATUS[o.status]||'')).toLowerCase().includes(q));document.getElementById('objectList').innerHTML=a.length?a.map(o=>'<div class="listitem"><div class="objicon" style="color:'+(COLOR[o.type]||'#fff')+'">'+(ICON[o.type]||'●')+'</div><div class="objmeta"><strong>'+esc(TYPE[o.type])+' '+esc(o.name||o.id)+'</strong><span class="pill">'+esc(STATUS[o.status])+'</span><div class="small">'+esc(o.notes||'')+'</div></div><button class="mini" onclick="showObj('+o.id+')">На карте</button></div>').join(''):'<div class="hint">Ничего не найдено.</div>'}
+function showObj(id){closeSheets();selectObject(id);goSelected()}
+function togglePath(){if(!pathMode){pathMode=true;draft=[];document.getElementById('pathBtn').classList.add('active');mode('Рисование тропы: касайся карты. Нажми «Тропа» ещё раз — сохранить.')}else finishPath()}
+function finishPath(){pathMode=false;document.getElementById('pathBtn').classList.remove('active');mode('');if(draft.length>=2){const n=prompt('Название тропы','Тропа '+(S.paths.length+1))||'Тропа';S.paths.push({id:Date.now(),name:n,kind:'manual',points:draft.slice()});save();toast('Тропа сохранена')}draft=[];draw()}
+function toggleTrack(){if(!S.track){if(!me){toast('Нет GPS');return}S.track=true;S.trackPoints=[[me.lat,me.lon,Date.now(),acc]];save();closeSheets();document.getElementById('pathBtn').classList.add('rec');mode('● Идёт запись маршрута по GPS. Не гаси экран до завершения.');toast('Запись маршрута началась')}else{S.track=false;document.getElementById('pathBtn').classList.remove('rec');mode('');if(S.trackPoints.length>=2){const n=prompt('Название маршрута','GPS-маршрут '+(S.paths.filter(p=>p.kind==='gps').length+1))||'GPS-маршрут';S.paths.push({id:Date.now(),name:n,kind:'gps',points:S.trackPoints.map(p=>[p[0],p[1]])});toast('Маршрут сохранён')}S.trackPoints=[];save();draw()}}
+function mode(t){const e=document.getElementById('mode');if(t){e.textContent=t;e.classList.add('open')}else e.classList.remove('open')}
+function openMenu(){openSheet('menuSheet')}
+function openProgress(){const h=S.objects.filter(o=>o.type==='home'),done=h.filter(o=>o.status==='done').length,avg=h.length?Math.round(h.reduce((s,o)=>s+(WEIGHT[o.status]||0),0)/h.length):0,c={};Object.keys(STATUS).forEach(k=>c[k]=h.filter(o=>o.status===k).length);document.getElementById('progressContent').innerHTML='<div class="statgrid"><div class="stat"><b>'+h.length+'</b>Домов</div><div class="stat"><b>'+done+'</b>Готово</div><div class="stat"><b>'+h.filter(o=>!['planned','done'].includes(o.status)).length+'</b>В работе</div><div class="stat"><b>'+avg+'%</b>Средняя готовность</div></div><div class="progress"><div style="width:'+avg+'%"></div></div>'+Object.keys(STATUS).map(k=>'<div class="stage"><span>'+STATUS[k]+'</span><b>'+c[k]+'</b></div>').join('');openSheet('progressSheet')}
+function openOffline(){offlineEstimate();refreshStats();openSheet('offlineSheet')}
+function tileEstimate(lat,lon,r,z1,z2){let total=0,dlat=r/111320,dlon=r/(111320*Math.max(.15,Math.cos(lat*Math.PI/180)));for(let z=z1;z<=z2;z++){const n=1<<z,x1=Math.floor((lon-dlon+180)/360*n),x2=Math.floor((lon+dlon+180)/360*n),fy=a=>Math.floor((1-Math.log(Math.tan(a*Math.PI/180)+1/Math.cos(a*Math.PI/180))/Math.PI)/2*n),y1=fy(Math.min(85,lat+dlat)),y2=fy(Math.max(-85,lat-dlat));total+=(Math.abs(x2-x1)+1)*(Math.abs(y2-y1)+1)}return total}
+function offlineEstimate(){const r=+document.getElementById('radius').value,[z1,z2]=document.getElementById('quality').value.split(',').map(Number),lat=me?.lat??M.lat,lon=me?.lon??M.lon,n=tileEstimate(lat,lon,r,z1,z2);document.getElementById('estimate').innerHTML='Примерно <b>'+n+'</b> тайлов · ориентировочно <b>'+Math.max(1,Math.round(n*28/1024))+' МБ</b>.'}
+function startDownload(lat,lon){const r=+document.getElementById('radius').value,[z1,z2]=document.getElementById('quality').value.split(',').map(Number);let res;try{res=JSON.parse(A('startOffline',lat,lon,r,z1,z2)||'{}')}catch(e){res={ok:false,error:'Ошибка запуска'}}if(!res.ok){toast(res.error||'Не удалось запустить');return}document.getElementById('offlineProgress').classList.add('open');document.getElementById('offlineBar').style.width='0%';document.getElementById('offlineText').textContent='0 / '+res.total;toast('Загрузка началась')}
+function downloadAroundMe(){if(!me){toast('Нет GPS');return}startDownload(me.lat,me.lon)}
+function downloadAtCenter(){startDownload(M.lat,M.lon)}
+window.onOfflineProgress=(done,total,ok,failed,finish)=>{const p=Math.round(done/total*100);document.getElementById('offlineBar').style.width=p+'%';document.getElementById('offlineText').textContent=p+'% · '+done+'/'+total+' · сохранено '+ok+(failed?' · ошибок '+failed:'');if(finish){imgs.clear();refreshStats();draw();toast('Офлайн-карта готова')}};
+function cancelOffline(){A('cancelOffline');toast('Загрузка остановлена')}
+function refreshStats(){try{const s=JSON.parse(A('cacheStats')||'{}');document.getElementById('cacheStats').innerHTML='На телефоне: <b>'+(s.tiles||0)+'</b> тайлов · <b>'+bytes(s.bytes||0)+'</b>'}catch(e){}}
+function clearCache(){if(confirm('Удалить все скачанные спутниковые тайлы? Объекты и тропы останутся.'))A('clearOfflineTiles')}
+window.onCacheChanged=()=>{imgs.clear();refreshStats();draw();toast('Кэш очищен')};
+function openBackup(){openSheet('backupSheet')}function exportBackup(){A('exportBackup',JSON.stringify(S))}function chooseImport(){A('chooseImport')}
+window.importFromNative=text=>{try{const s=JSON.parse(text);if(!s||!Array.isArray(s.objects))throw 0;if(confirm('Заменить текущий проект данными из файла?')){S=Object.assign({objects:[],paths:[],nextId:1,track:false,trackPoints:[]},s);S.track=false;S.trackPoints=[];save();closeSheets();closeSelected();draw();toast('Проект восстановлен')}}catch(e){toast('Некорректный файл проекта')}};
+function openSheet(id){closeSheets();document.getElementById(id).classList.add('open')}function closeSheets(){document.querySelectorAll('.sheet').forEach(x=>x.classList.remove('open'))}
+function hit(x,y){let b=null,d=28;for(const o of S.objects){const p=screen(o.lat,o.lon),n=Math.hypot(p.x-x,p.y-y);if(n<d){d=n;b=o}}return b}
+C.addEventListener('pointerdown',e=>{C.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,t:Date.now()});if(pointers.size===1)gesture={type:'pan',c:world(M.lat,M.lon,M.z),sx:e.clientX,sy:e.clientY,moved:false};else if(pointers.size===2){const a=[...pointers.values()];gesture={type:'pinch',dist:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y),z:M.z}}});
+C.addEventListener('pointermove',e=>{const p=pointers.get(e.pointerId);if(!p)return;p.x=e.clientX;p.y=e.clientY;if(gesture?.type==='pan'&&pointers.size===1){const dx=e.clientX-gesture.sx,dy=e.clientY-gesture.sy;if(Math.hypot(dx,dy)>4)gesture.moved=true;const c=inv(gesture.c.x-dx,gesture.c.y-dy,M.z);M.lat=c.lat;M.lon=c.lon;draw()}else if(gesture?.type==='pinch'&&pointers.size===2){const a=[...pointers.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y);if(d>gesture.dist*1.35&&M.z===gesture.z){zoomBy(1);gesture.z=M.z;gesture.dist=d}else if(d<gesture.dist*.72&&M.z===gesture.z){zoomBy(-1);gesture.z=M.z;gesture.dist=d}}});
+C.addEventListener('pointerup',e=>{const p=pointers.get(e.pointerId),single=pointers.size===1,moved=gesture?.moved;pointers.delete(e.pointerId);if(single&&p&&!moved&&Math.hypot(p.x-p.sx,p.y-p.sy)<8){const r=C.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;if(pathMode){const c=coord(x,y);draft.push([c.lat,c.lon]);draw()}else{const o=hit(x,y);o?selectObject(o.id):closeSelected()}}if(!pointers.size)gesture=null});C.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);if(!pointers.size)gesture=null});
+function distance(a,b,c,d){const R=6371000,r=Math.PI/180,p1=a*r,p2=c*r,dp=(c-a)*r,dl=(d-b)*r,x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x))}
+function bearing(a,b,c,d){const r=Math.PI/180,p1=a*r,p2=c*r,dl=(d-b)*r,y=Math.sin(dl)*Math.cos(p2),x=Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl);return(Math.atan2(y,x)/r+360)%360}
+function formatDistance(m){return m<1000?Math.round(m)+' м':(m/1000).toFixed(2)+' км'}function bytes(b){return b<1048576?(b/1024).toFixed(1)+' КБ':(b/1048576).toFixed(1)+' МБ'}function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+load();resize();offlineEstimate();
+</script>
+</body>
+</html>
