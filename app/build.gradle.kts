@@ -8,11 +8,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.blocksolver"
+        applicationId = "com.stroikarta.field"
         minSdk = 26
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.3-combo-math"
+        versionCode = 90
+        versionName = "0.9-field"
     }
 
     compileOptions {
