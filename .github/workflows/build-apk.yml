@@ -1,9 +1,9 @@
-name: Build Android APK
+name: Build StroyKarta APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, stroykarta-build ]
 
 jobs:
   build:
@@ -35,6 +35,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: BlockSolverAssistant-debug
+          name: StroyKarta-1.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
