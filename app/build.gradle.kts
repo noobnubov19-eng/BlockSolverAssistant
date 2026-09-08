@@ -11,8 +11,8 @@ android {
         applicationId = "com.stroikarta.field"
         minSdk = 26
         targetSdk = 35
-        versionCode = 90
-        versionName = "0.9-field"
+        versionCode = 100
+        versionName = "1.0-field"
     }
 
     compileOptions {
